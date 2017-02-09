@@ -69,5 +69,18 @@ endif
 	@printf "Kernel:   "
 	@readlink -m $(KERNEL_SRC_DIR)
 
+ifdef CROSS_COMPILE
+#========== Following code sequence is for developing purposes only ===========
+$(TARGET_NAME).ko: all
+
+TARGET_DEVICE_USER ?= root
+TARGET_DEVICE_IP   ?= 10.0.0.1
+TRAGET_DEVICE_DIR  ?= /root
+
+.PHONY: scp
+scp: $(TARGET_NAME).ko
+	scp $(TARGET_NAME).ko $(TARGET_DEVICE_USER)@$(TARGET_DEVICE_IP):$(TRAGET_DEVICE_DIR)
+
+endif # ifdef CROSS_COMPILE
 endif # /ifdef KERNELRELEASE
 #=================================== EOF ======================================
