@@ -8,4 +8,6 @@ If these environment variables are not set so the modules becomes compiles for t
 Directory ./char_driver contains a C- source file and the corresponding makefile as template for
 programming Linux- character- device- drivers for single or multiple instances (depending on macro MAX_INSTANCES).
 
+Directory ./select_poll contains a example how a kernel-space-driver cooperates by the user-space function "select()" respectively "poll()".
+
 
