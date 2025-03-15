@@ -78,7 +78,7 @@ typedef struct
    wait_queue_head_t writeWaitQueue;
    int               index;
    char              buffer[16];
-} INSTANCE;
+} INSTANCE_T;
 
 /*!
  * @brief Structure of global variables.
@@ -92,10 +92,10 @@ typedef struct
    dev_t                   deviceNumber;
    struct cdev*            pObject;
    struct class*           pClass;
-   INSTANCE                instance[MAX_INSTANCES];
-} MODULE_GLOBAL;
+   INSTANCE_T              instance[MAX_INSTANCES];
+} MODULE_GLOBAL_T;
 
-static MODULE_GLOBAL mg;
+static MODULE_GLOBAL_T mg;
 
 /* Device file operations begin **********************************************/
 /*!----------------------------------------------------------------------------
@@ -105,7 +105,7 @@ static MODULE_GLOBAL mg;
 static int onOpen( struct inode* pInode, struct file* pInstance )
 {
    int instanceIndex = MINOR(pInode->i_rdev);
-   INSTANCE* pObject = &mg.instance[ instanceIndex ];
+   INSTANCE_T* pObject = &mg.instance[ instanceIndex ];
 
    DEBUG_MESSAGE( ": Minor-number: %d\n", instanceIndex );
    BUG_ON( pInstance->private_data != NULL );
@@ -147,7 +147,7 @@ static ssize_t onRead( struct file* pInstance,   /*!< @see include/linux/fs.h   
 {
    ssize_t remaining;
    size_t  copyLen;
-   INSTANCE* pObject = pInstance->private_data;
+   INSTANCE_T* pObject = pInstance->private_data;
 
    DEBUG_MESSAGE( ": userCapacity = %ld, offset = %lld\n", (long int)userCapacity, *pOffset );
    DEBUG_ACCESSMODE( pInstance );
@@ -206,7 +206,7 @@ static ssize_t onWrite( struct file *pInstance,
                         size_t len,
                         loff_t* pOffset )
 {
-   INSTANCE* pObject = pInstance->private_data;
+   INSTANCE_T* pObject = pInstance->private_data;
 
    BUG_ON( pObject == NULL );
    DEBUG_MESSAGE( ": len = %ld, offset = %lld\n", (long int)len, *pOffset );
@@ -252,7 +252,7 @@ static ssize_t onWrite( struct file *pInstance,
  */
 static unsigned int onPoll( struct file* pInstance, poll_table* pPollTable )
 {
-   INSTANCE* pObject = pInstance->private_data;
+   INSTANCE_T* pObject = pInstance->private_data;
    unsigned int ret = 0;
 
    BUG_ON( pObject == NULL );

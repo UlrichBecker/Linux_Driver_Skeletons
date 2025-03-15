@@ -89,8 +89,10 @@ typedef struct
 {
    int      minor;
    atomic_t openCount;
-   // Further attributes for your application ...
-} INSTANCE;
+   /*
+    * Further attributes for your application ...
+    */
+} INSTANCE_T;
 
 /*!
  * @brief Structure of global variables.
@@ -105,16 +107,16 @@ typedef struct
    struct cdev*            pObject;
    struct class*           pClass;
 #if MAX_INSTANCES > 1
-   INSTANCE                instance[MAX_INSTANCES];
+   INSTANCE_T              instance[MAX_INSTANCES];
 #else
-   INSTANCE                instance;
+   INSTANCE_T              instance;
 #endif
 #ifdef CONFIG_PROC_FS
    struct proc_dir_entry*  poProcFile;
 #endif
-} MODULE_GLOBAL;
+} MODULE_GLOBAL_T;
 
-static MODULE_GLOBAL mg;
+static MODULE_GLOBAL_T mg_module;
 
 /* Device file operations begin **********************************************/
 /*!----------------------------------------------------------------------------
@@ -127,14 +129,14 @@ static int onOpen( struct inode* pInode, struct file* pInstance )
    BUG_ON( pInstance->private_data != NULL );
 #if MAX_INSTANCES > 1
    BUG_ON( MINOR(pInode->i_rdev) >= MAX_INSTANCES );
-   pInstance->private_data = &mg.instance[ MINOR(pInode->i_rdev) ];
-   atomic_inc( &mg.instance[ MINOR(pInode->i_rdev) ].openCount );
+   pInstance->private_data = &mg_module.instance[ MINOR(pInode->i_rdev) ];
+   atomic_inc( &mg_module.instance[ MINOR(pInode->i_rdev) ].openCount );
    DEBUG_MESSAGE( ":   Open-counter: %d\n", 
-                  atomic_read( &mg.instance[ MINOR(pInode->i_rdev) ].openCount ));
+                  atomic_read( &mg_module.instance[ MINOR(pInode->i_rdev) ].openCount ));
 #else
-   atomic_inc( &mg.instance.openCount );
+   atomic_inc( &mg_module.instance.openCount );
    DEBUG_MESSAGE( ":   Open-counter: %d\n", 
-                  atomic_read( &mg.instance.openCount ));
+                  atomic_read( &mg_module.instance.openCount ));
 #endif
    return 0;
 }
@@ -148,13 +150,13 @@ static int onClose( struct inode *pInode, struct file* pInstance )
    DEBUG_MESSAGE( ": Minor-number: %d\n", MINOR(pInode->i_rdev) );
 #if MAX_INSTANCES > 1
    BUG_ON( pInstance->private_data == NULL );
-   atomic_dec( &mg.instance[ MINOR(pInode->i_rdev) ].openCount );
+   atomic_dec( &mg_module.instance[ MINOR(pInode->i_rdev) ].openCount );
    DEBUG_MESSAGE( "   Open-counter: %d\n", 
-                  atomic_read( &mg.instance[ MINOR(pInode->i_rdev) ].openCount ));
+                  atomic_read( &mg_module.instance[ MINOR(pInode->i_rdev) ].openCount ));
 #else
-   atomic_dec( &mg.instance.openCount );
+   atomic_dec( &mg_module.instance.openCount );
    DEBUG_MESSAGE( "   Open-counter: %d\n", 
-                  atomic_read( &mg.instance.openCount ));
+                  atomic_read( &mg_module.instance.openCount ));
 #endif
    return 0;
 }
@@ -177,17 +179,17 @@ static ssize_t onRead( struct file* pInstance,   /*!< @see include/linux/fs.h   
 
 #if MAX_INSTANCES > 1
    BUG_ON( pInstance->private_data == NULL );
-   DEBUG_MESSAGE( "   Minor: %d\n", ((INSTANCE*)pInstance->private_data)->minor );
+   DEBUG_MESSAGE( "   Minor: %d\n", ((INSTANCE_T*)pInstance->private_data)->minor );
    DEBUG_MESSAGE( "   Open-counter: %d\n",
-                   atomic_read( &((INSTANCE*)pInstance->private_data)->openCount ));
+                   atomic_read( &((INSTANCE_T*)pInstance->private_data)->openCount ));
 
    n = snprintf( tmp,
                  min( len, sizeof(tmp) ), 
                  "Hello world from instance: %d\n",
-                ((INSTANCE*)pInstance->private_data)->minor );
+                ((INSTANCE_T*)pInstance->private_data)->minor );
 #else
    DEBUG_MESSAGE( "   Open-counter: %d\n", 
-                  atomic_read( &mg.instance.openCount ));
+                  atomic_read( &mg_module.instance.openCount ));
 
    n = snprintf( tmp,
                  min( len, sizeof(tmp) ),
@@ -223,12 +225,12 @@ static ssize_t onWrite( struct file *pInstance,
 
 #if MAX_INSTANCES > 1
    BUG_ON( pInstance->private_data == NULL );
-   DEBUG_MESSAGE( "   Minor: %d\n", ((INSTANCE*)pInstance->private_data)->minor );
+   DEBUG_MESSAGE( "   Minor: %d\n", ((INSTANCE_T*)pInstance->private_data)->minor );
    DEBUG_MESSAGE( "   Open-counter: %d\n",
-                   atomic_read( &((INSTANCE*)pInstance->private_data)->openCount ));
+                   atomic_read( &((INSTANCE_T*)pInstance->private_data)->openCount ));
 #else
    DEBUG_MESSAGE( "   Open-counter: %d\n", 
-                  atomic_read( &mg.instance.openCount ));
+                  atomic_read( &mg_module.instance.openCount ));
 #endif
    DEBUG_MESSAGE( "   Received: \"%s\"\n", pBuffer );
    return len;
@@ -246,12 +248,12 @@ static long onIoctrl( struct file* pInstance,
    DEBUG_ACCESSMODE( pInstance );
 #if MAX_INSTANCES > 1
    BUG_ON( pInstance->private_data == NULL );
-   DEBUG_MESSAGE( "   Minor: %d\n", ((INSTANCE*)pInstance->private_data)->minor );
+   DEBUG_MESSAGE( "   Minor: %d\n", ((INSTANCE_T*)pInstance->private_data)->minor );
    DEBUG_MESSAGE( "   Open-counter: %d\n",
-                   atomic_read( &((INSTANCE*)pInstance->private_data)->openCount ));
+                   atomic_read( &((INSTANCE_T*)pInstance->private_data)->openCount ));
 #else
    DEBUG_MESSAGE( "   Open-counter: %d\n",
-                   atomic_read( &mg.instance.openCount ));
+                   atomic_read( &mg_module.instance.openCount ));
 #endif
    return 0;
 }
@@ -357,22 +359,22 @@ static int __init driverInit( void )
 #endif
    DEBUG_MESSAGE("\n");
 
-   if( alloc_chrdev_region( &mg.deviceNumber, 0, MAX_INSTANCES, DEVICE_BASE_FILE_NAME ) < 0 )
+   if( alloc_chrdev_region( &mg_module.deviceNumber, 0, MAX_INSTANCES, DEVICE_BASE_FILE_NAME ) < 0 )
    {
       ERROR_MESSAGE( "alloc_chrdev_region\n" );
       return -EIO;
    }
 
-   mg.pObject = cdev_alloc();
-   if( mg.pObject == NULL )
+   mg_module.pObject = cdev_alloc();
+   if( mg_module.pObject == NULL )
    {
       ERROR_MESSAGE( "cdev_alloc\n" );
       goto L_DEVICE_NUMBER;
    }
 
-   mg.pObject->owner = THIS_MODULE;
-   mg.pObject->ops = &mg_fops;
-   if( cdev_add( mg.pObject, mg.deviceNumber, MAX_INSTANCES ) )
+   mg_module.pObject->owner = THIS_MODULE;
+   mg_module.pObject->ops = &mg_fops;
+   if( cdev_add( mg_module.pObject, mg_module.deviceNumber, MAX_INSTANCES ) )
    {
       ERROR_MESSAGE( "cdev_add\n" );
       goto L_REMOVE_DEV;
@@ -381,8 +383,8 @@ static int __init driverInit( void )
   /*!
    * Register of the driver-instances visible in /sys/class/DEVICE_BASE_FILE_NAME
    */
-   mg.pClass = class_create( THIS_MODULE, DEVICE_BASE_FILE_NAME );
-   if( IS_ERR(mg.pClass) )
+   mg_module.pClass = class_create( THIS_MODULE, DEVICE_BASE_FILE_NAME );
+   if( IS_ERR(mg_module.pClass) )
    {
       ERROR_MESSAGE( "class_create: No udev support\n" );
       goto L_CLASS_REMOVE;
@@ -392,9 +394,9 @@ static int __init driverInit( void )
    for( minor = 0; minor < MAX_INSTANCES; minor++ )
    {
       currentMinor = minor;
-      if( device_create( mg.pClass,
+      if( device_create( mg_module.pClass,
                          NULL,
-                         mg.deviceNumber | minor,
+                         mg_module.deviceNumber | minor,
                          NULL,
                          DEVICE_BASE_FILE_NAME "%d",
                          minor )
@@ -403,15 +405,15 @@ static int __init driverInit( void )
          ERROR_MESSAGE( "device_create: " DEVICE_BASE_FILE_NAME "%d\n", minor );
          goto L_INSTANCE_REMOVE;
       }
-      mg.instance[minor].minor = minor;
-      atomic_set( &mg.instance[minor].openCount, 0 );
+      mg_module.instance[minor].minor = minor;
+      atomic_set( &mg_module.instance[minor].openCount, 0 );
       DEBUG_MESSAGE( ": Instance " DEVICE_BASE_FILE_NAME "%d created\n", minor );
    }
    currentMinor = MAX_INSTANCES;
 #else
-   if( device_create( mg.pClass,
+   if( device_create( mg_module.pClass,
                       NULL,
-                      mg.deviceNumber,
+                      mg_module.deviceNumber,
                       NULL,
                       DEVICE_BASE_FILE_NAME )
       == NULL )
@@ -419,22 +421,22 @@ static int __init driverInit( void )
       ERROR_MESSAGE( "device_create: " DEVICE_BASE_FILE_NAME "\n" );
       goto L_INSTANCE_REMOVE;
    }
-   mg.instance.minor = 0;
-   atomic_set( &mg.instance.openCount, 0 );
+   mg_module.instance.minor = 0;
+   atomic_set( &mg_module.instance.openCount, 0 );
    DEBUG_MESSAGE( ": Instance " DEVICE_BASE_FILE_NAME " created\n" );
 #endif
 
 #ifdef CONFIG_PM
-  mg.pClass->suspend = onPmSuspend;
-  mg.pClass->resume =  onPmResume;
+  mg_module.pClass->suspend = onPmSuspend;
+  mg_module.pClass->resume =  onPmResume;
 #endif
 
 #ifdef CONFIG_PROC_FS
-   mg.poProcFile = proc_create( PROC_FS_NAME,
+   mg_module.poProcFile = proc_create( PROC_FS_NAME,
                                 S_IRUGO | S_IWUGO,
                                 NULL,
                                 &mg_procFileOps );
-   if( mg.poProcFile == NULL )
+   if( mg_module.poProcFile == NULL )
    {
       ERROR_MESSAGE( "Unable to create proc entry: /proc/"PROC_FS_NAME" !\n" );
       goto L_INSTANCE_REMOVE;
@@ -447,19 +449,19 @@ static int __init driverInit( void )
 L_INSTANCE_REMOVE:
 #if MAX_INSTANCES > 1
    for( minor = 0; minor < currentMinor; minor++ )
-      device_destroy( mg.pClass, mg.deviceNumber | minor );
+      device_destroy( mg_module.pClass, mg_module.deviceNumber | minor );
 #else
-   device_destroy( mg.pClass, mg.deviceNumber );
+   device_destroy( mg_module.pClass, mg_module.deviceNumber );
 #endif
 
 L_CLASS_REMOVE:
-   class_destroy( mg.pClass );
+   class_destroy( mg_module.pClass );
 
 L_REMOVE_DEV:
-   kobject_put( &mg.pObject->kobj );
+   kobject_put( &mg_module.pObject->kobj );
 
 L_DEVICE_NUMBER:
-   unregister_chrdev_region( mg.deviceNumber, 1 );
+   unregister_chrdev_region( mg_module.deviceNumber, 1 );
 
    return -EIO;
 }
@@ -479,13 +481,13 @@ static void __exit driverExit( void )
 
 #if MAX_INSTANCES > 1
   for( minor = 0; minor < MAX_INSTANCES; minor++ )
-     device_destroy( mg.pClass, mg.deviceNumber | minor );
+     device_destroy( mg_module.pClass, mg_module.deviceNumber | minor );
 #else
-  device_destroy( mg.pClass, mg.deviceNumber );
+  device_destroy( mg_module.pClass, mg_module.deviceNumber );
 #endif
-  class_destroy( mg.pClass );
-  cdev_del( mg.pObject );
-  unregister_chrdev_region( mg.deviceNumber, MAX_INSTANCES );
+  class_destroy( mg_module.pClass );
+  cdev_del( mg_module.pObject );
+  unregister_chrdev_region( mg_module.deviceNumber, MAX_INSTANCES );
   return;
 }
 

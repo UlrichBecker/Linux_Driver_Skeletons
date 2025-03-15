@@ -16,9 +16,13 @@ CONFIG_SKELETON ?= m
 
 ifdef KERNELRELEASE
    # This code-segment becomes invoked from the kernels master-makefile.
-   EXTRA_CFLAGS += $(addprefix -D, $(DEFINES))
+   ifdef DEFINES
+      EXTRA_CFLAGS += $(addprefix -D, $(DEFINES))
+   endif
    obj-$(CONFIG_SKELETON) += $(TARGET_NAME).o
-   $(TARGET_NAME)-objs := $(patsubst %.c, %.o, $(SOURCES))
+   ifdef SOURCES
+      $(TARGET_NAME)-objs := $(patsubst %.c, %.o, $(SOURCES))
+   endif
 else
    # This code-segment becomes invoked immediately.
    ifdef CROSS_COMPILE
@@ -37,9 +41,9 @@ else
 # Invoke of the kernels master-makefile.
 all: checkKernelDir status
 ifdef CROSS_COMPILE
-	@$(MAKE) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) -C $(KERNEL_SRC_DIR) SUBDIRS=$(PWD) modules
+	@$(MAKE) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) -C $(KERNEL_SRC_DIR) M=$(PWD) modules
 else
-	@$(MAKE) -C $(KERNEL_SRC_DIR) SUBDIRS=$(PWD) modules
+	@$(MAKE) -C $(KERNEL_SRC_DIR) M=$(PWD) modules
 endif
 
 checkKernelDir:
