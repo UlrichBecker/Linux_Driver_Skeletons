@@ -19,6 +19,7 @@
 #include <linux/wait.h>
 #include <linux/sched.h>
 
+
 MODULE_LICENSE( "GPL" );
 
 /*!
@@ -319,7 +320,11 @@ static int __init driverInit( void )
   /*!
    * Register of the driver-instances visible in /sys/class/DEVICE_BASE_FILE_NAME
    */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+   mg.pClass = class_create( DEVICE_BASE_FILE_NAME );
+#else
    mg.pClass = class_create( THIS_MODULE, DEVICE_BASE_FILE_NAME );
+#endif
    if( IS_ERR(mg.pClass) )
    {
       ERROR_MESSAGE( "class_create: No udev support\n" );

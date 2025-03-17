@@ -286,7 +286,11 @@ static int procOnOpen( struct seq_file* pSeqFile, void* pValue )
  */
 static int _procOnOpen( struct inode* pInode, struct file *pFile )
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)
+   return single_open( pFile, procOnOpen, NULL );
+#else
    return single_open( pFile, procOnOpen, PDE_DATA( pInode ) );
+#endif
 }
 
 /*-----------------------------------------------------------------------------
@@ -300,6 +304,16 @@ static ssize_t procOnWrite( struct file* seq, const char* pData,
 
 /*-----------------------------------------------------------------------------
  */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
+static const struct proc_ops mg_procFileOps =
+{
+  .proc_open    = _procOnOpen,
+  .proc_read    = seq_read,
+  .proc_write   = procOnWrite,
+  .proc_lseek   = seq_lseek,
+  .proc_release = single_release
+};
+#else
 static const struct file_operations mg_procFileOps =
 {
   .owner   = THIS_MODULE,
@@ -307,13 +321,14 @@ static const struct file_operations mg_procFileOps =
   .read    = seq_read,
   .write   = procOnWrite,
   .llseek  = seq_lseek,
-  .release = single_release,
+  .release = single_release
 };
+#endif
 #endif /* ifdef CONFIG_PROC_FS */
 /* Process-file-system end ***************************************************/
 
 /* Power management functions begin ******************************************/
-#ifdef CONFIG_PM
+#ifdef CONFIG_PM__
 /*-----------------------------------------------------------------------------
  */
 static int onPmSuspend( struct device* pDev, pm_message_t state )
@@ -383,7 +398,11 @@ static int __init driverInit( void )
   /*!
    * Register of the driver-instances visible in /sys/class/DEVICE_BASE_FILE_NAME
    */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+   mg_module.pClass = class_create( DEVICE_BASE_FILE_NAME );
+#else
    mg_module.pClass = class_create( THIS_MODULE, DEVICE_BASE_FILE_NAME );
+#endif
    if( IS_ERR(mg_module.pClass) )
    {
       ERROR_MESSAGE( "class_create: No udev support\n" );
@@ -426,16 +445,23 @@ static int __init driverInit( void )
    DEBUG_MESSAGE( ": Instance " DEVICE_BASE_FILE_NAME " created\n" );
 #endif
 
-#ifdef CONFIG_PM
+#ifdef CONFIG_PM__
   mg_module.pClass->suspend = onPmSuspend;
   mg_module.pClass->resume =  onPmResume;
 #endif
 
 #ifdef CONFIG_PROC_FS
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)
+   mg_module.poProcFile = proc_create_data( PROC_FS_NAME,
+                                            S_IRUGO | S_IWUGO, NULL,
+                                            &mg_procFileOps,
+                                            NULL ); //proc_data );
+ #else
    mg_module.poProcFile = proc_create( PROC_FS_NAME,
-                                S_IRUGO | S_IWUGO,
-                                NULL,
-                                &mg_procFileOps );
+                                       S_IRUGO | S_IWUGO,
+                                       NULL,
+                                       &mg_procFileOps );
+ #endif
    if( mg_module.poProcFile == NULL )
    {
       ERROR_MESSAGE( "Unable to create proc entry: /proc/"PROC_FS_NAME" !\n" );

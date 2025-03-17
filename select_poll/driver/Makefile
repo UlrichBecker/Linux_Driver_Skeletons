@@ -59,7 +59,7 @@ checkKernelDir:
 	fi
 
 clean:
-	rm -f *.mod.c *.o *.ko modules.order Module.symvers .*.cmd .tmp_versions/*
+	rm -f *.mod.c *.o *.ko modules.order Module.symvers .*.cmd .tmp_versions/* *.livepatch $(TARGET_NAME).mod
 	rmdir .tmp_versions
 
 status:
