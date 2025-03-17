@@ -15,7 +15,7 @@
 #include <linux/cdev.h>
 #include <linux/device.h>
 #include <linux/poll.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <linux/wait.h>
 #include <linux/sched.h>
 

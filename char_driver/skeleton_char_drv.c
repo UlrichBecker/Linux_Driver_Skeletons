@@ -15,7 +15,7 @@
 #include <linux/fs.h>
 #include <linux/cdev.h>
 #include <linux/device.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #ifdef CONFIG_PROC_FS
    #include <linux/proc_fs.h>
    #include <linux/seq_file.h>
@@ -232,8 +232,18 @@ static ssize_t onWrite( struct file *pInstance,
    DEBUG_MESSAGE( "   Open-counter: %d\n", 
                   atomic_read( &mg_module.instance.openCount ));
 #endif
-   DEBUG_MESSAGE( "   Received: \"%s\"\n", pBuffer );
-   return len;
+   char tmp[256];
+   memset( tmp, 0, sizeof(tmp) );
+
+   size_t n = min( ARRAY_SIZE( tmp )-1, len );
+
+   if( copy_from_user( tmp, pBuffer, n ) != 0 )
+   {
+      ERROR_MESSAGE( "copy_from_user\n" );
+      return -EFAULT;
+   }
+   INFO_MESSAGE( "Received: %s", tmp );
+   return n;
 }
 
 /*!----------------------------------------------------------------------------
@@ -304,7 +314,7 @@ static ssize_t procOnWrite( struct file* seq, const char* pData,
 
 /*-----------------------------------------------------------------------------
  */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
 static const struct proc_ops mg_procFileOps =
 {
   .proc_open    = _procOnOpen,
