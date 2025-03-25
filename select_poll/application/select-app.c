@@ -95,7 +95,9 @@ int main( void )
    int i;
    ssize_t readBytes;
 
-   printf( "Poll-Test. Hit Esc to end.\n" );
+   printf( "Poll-Test. Hit Esc to end.\n"
+           "Open a further console and send a message to /dev/poll0 or /dev/poll1\n"
+           "E.g.: echo \"Hello world\" > /dev/poll0\n" );
    if( prepareTerminalInput() != 0 )
       return EXIT_FAILURE;
 
@@ -147,7 +149,7 @@ int main( void )
                printf( "%s: ", g_pollObjs[i].pFileName );
                fflush( NULL );
                write( STDOUT_FILENO, g_Buffer, readBytes );
-              // if( (readBytes > 1) && (g_Buffer[readBytes-1] != '\n') )
+               if( (readBytes > 1) && (g_Buffer[readBytes-1] != '\n') )
                   puts( "\n" );
                fflush( NULL );
             }
