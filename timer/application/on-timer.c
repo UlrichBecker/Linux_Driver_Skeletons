@@ -30,74 +30,34 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <string.h>
-#include <dirent.h>
+#include <findInstances.h>
+#include <terminalHelper.h>
 
 #ifndef ARRAY_SIZE
  #define ARRAY_SIZE( a ) (sizeof( a ) / sizeof( a[0] ))
 #endif
 
+
+#define BASE_NAME "timer"
+
 typedef struct
 {
    char  fileName[16];
    int   fd;
+   unsigned int recCount;
 } POLL_OBJ_T;
 
-static struct termios g_originTerminal;
-
-/*-----------------------------------------------------------------------------
-*/
-static inline int resetTerminalInput( void )
-{
-   return tcsetattr( STDIN_FILENO, TCSANOW, &g_originTerminal );
-}
-
-/*-----------------------------------------------------------------------------
-*/
-static int prepareTerminalInput( void )
-{
-   struct termios newTerminal;
-
-   if( tcgetattr( STDIN_FILENO, &g_originTerminal ) < 0 )
-      return -1;
-
-   newTerminal = g_originTerminal;
-   newTerminal.c_lflag     &= ~(ICANON | ECHO);  /* Disable canonic mode and echo.*/
-   newTerminal.c_cc[VMIN]  = 1;  /* Reading is complete after one byte only. */
-   newTerminal.c_cc[VTIME] = 0;  /* No timer. */
-
-   return tcsetattr( STDIN_FILENO, TCSANOW, &newTerminal );
-}
-
-
-static int getNumberOfFoundDriverInstances( void )
-{
-   DIR*           pDir;
-   struct dirent* poEntry;
-   int count = 0;
-
-   pDir = opendir( "/dev" );
-   if( pDir == NULL )
-      return -1;
-
-   while( (poEntry = readdir( pDir )) != NULL )
-   {
-      if( poEntry->d_type == DT_DIR )
-         continue;
-
-      if( strncmp( "timer", poEntry->d_name, 5 ) != 0 )
-         continue;
-
-      count++;
-   }
-   closedir( pDir );
-   return count;
-}
+char g_textBuffer[64];
 
 int main( void )
 {
-   printf( "Test of Linux-kernel-driver \"timer\"\n" );
+   ssize_t readBytes;
+   printf( _ESC_XY( "1", "1" ) ESC_CLR_SCR  "Test of Linux-kernel-driver \"" BASE_NAME "\"\n"
+   "Open a further console and send a message to /dev/" BASE_NAME "0\n"
+   "E.g.: \"echo 1000 > /dev/" BASE_NAME "0\" sets a period of 1000 ms\n"
+   "      \"echo 0 > /dev/" BASE_NAME "0\" suspends this timer- instance.\n" );
 
-   const int numOfInstances = getNumberOfFoundDriverInstances();
+   const int numOfInstances = getNumberOfFoundDriverInstances( BASE_NAME );
    if( numOfInstances < 0 )
    {
       fprintf( stderr, "ERROR: Directory not found!\n" );
@@ -106,7 +66,7 @@ int main( void )
    printf( "Found driver instances: %d\n", numOfInstances );
    if( numOfInstances == 0 )
    {
-      printf( "No driver-instance found.\n" );
+      printf( "No driver-instance of " BASE_NAME " found.\n" );
       return EXIT_SUCCESS;
    }
 
@@ -126,7 +86,7 @@ int main( void )
    int fdMax = STDIN_FILENO;
    for( int i = 0; i < numOfInstances; i++ )
    {
-      snprintf( pUsers[i].fileName, ARRAY_SIZE( pUsers[0].fileName ), "/dev/timer%d", i );
+      snprintf( pUsers[i].fileName, ARRAY_SIZE( pUsers[0].fileName ), "/dev/" BASE_NAME "%d", i );
       printf( "Open device: \"%s\"\n", pUsers[i].fileName );
       pUsers[i].fd = open( pUsers[i].fileName, O_RDONLY );
       if( pUsers[i].fd < 0 )
@@ -135,6 +95,9 @@ int main( void )
          goto L_ERROR;
       }
       fdMax++;
+      if( pUsers[i].fd > fdMax )
+         fdMax = pUsers[i].fd;
+      pUsers[i].recCount = 0;
    }
    fdMax++;
 
@@ -160,7 +123,20 @@ int main( void )
       {
          if( (pUsers[i].fd > 0) && FD_ISSET( pUsers[i].fd, &rfds ))
          {
-         //TODO
+            readBytes = read( pUsers[i].fd, g_textBuffer, sizeof(g_textBuffer)-1 );
+            if( readBytes < 0 )
+            {
+               fprintf( stderr, "ERROR: unable to read from \"%s\": %s\n",
+                                pUsers[i].fileName,
+                                strerror( errno ) );
+               continue;
+            }
+            if( readBytes > 0 )
+            {
+               pUsers[i].recCount++;
+               g_textBuffer[readBytes] = '\0';
+               printf( ESC_XY ESC_CLR_LINE "Device: %s, count: %s received: %u\n", i+numOfInstances + 6, 1,  pUsers[i].fileName, g_textBuffer, pUsers[i].recCount );
+            }
          }
       }
 
@@ -172,6 +148,13 @@ int main( void )
             if( inKey == '\e' )
             {
                printf( "Exit loop...\n" );
+            }
+            if( inKey == 's' )
+            {
+               printf( "sleeping...\r" );
+               fflush( NULL );
+               sleep( 1 );
+               printf( ESC_CLR_LINE );
             }
          }
       }

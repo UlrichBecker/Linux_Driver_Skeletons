@@ -47,22 +47,17 @@ MODULE_LICENSE( "GPL" );
 /* End of message helper macros for "dmesg" ++++++++***************************/
 
 
-#define PERIOD_MS 1000
-
 typedef struct
 {
    unsigned int      minor;
    struct timer_list timer;
    unsigned int      period;
- //  atomic_t          openCount;
    struct mutex      oMutex;
    wait_queue_head_t readWaitQueue;
- //  wait_queue_head_t writeWaitQueue;
- //  int               index;
- //  char              buffer[16];
+   unsigned int    count;
 } INSTANCE_T;
 
-#define MAX_INSTANCES 2
+#define MAX_INSTANCES 4
 
 typedef struct
 {
@@ -95,15 +90,44 @@ static int onOpen( struct inode* pInode, struct file* pFile )
 /*!----------------------------------------------------------------------------
  * @brief
  */
+static int onClose( struct inode *pInode, struct file* pFile )
+{
+   DEBUG_MESSAGE( ": Minor-number: %d\n", MINOR(pInode->i_rdev) );
+   return 0;
+}
+
+/*!----------------------------------------------------------------------------
+ * @brief Callback function of the timer
+ */
+void onMyTimer( struct timer_list* pTimer )
+{
+    INSTANCE_T* pInstance = from_timer( pInstance, pTimer, timer );
+    DEBUG_MESSAGE( ": Minor-number: %d\n", pInstance->minor );
+    /*
+     * Restart the timer
+     */
+    mod_timer( pTimer, jiffies + msecs_to_jiffies( pInstance->period ) );
+
+    mutex_lock( &pInstance->oMutex );
+    pInstance->count++;
+    wake_up_interruptible( &pInstance->readWaitQueue );
+    mutex_unlock( &pInstance->oMutex );
+}
+
+/*!----------------------------------------------------------------------------
+ * @brief
+ */
 static unsigned int onPoll( struct file* pFile, poll_table* pPollTable )
 {
    unsigned int ret = 0;
    INSTANCE_T* pInstance = (INSTANCE_T*)pFile->private_data;
+   BUG_ON( pInstance == NULL );
    DEBUG_MESSAGE( ": Minor-number: %d\n", ((INSTANCE_T*)pFile->private_data)->minor );
 
    mutex_lock( &pInstance->oMutex );
    poll_wait( pFile, &pInstance->readWaitQueue, pPollTable );
-   ret |= (POLLIN | POLLRDNORM);
+   if( pInstance->count > 0 )
+      ret |= (POLLIN | POLLRDNORM);
    mutex_unlock( &pInstance->oMutex );
 
    return ret;
@@ -117,8 +141,28 @@ static ssize_t onRead( struct file* pFile,   /*!< @see include/linux/fs.h   */
                        size_t userCapacity,      /*!< maximum size to copy     */
                        loff_t* pOffset )         /*!< pointer to the already copied bytes */
 {
-   DEBUG_MESSAGE( ": Minor-number: %d\n", ((INSTANCE_T*)pFile->private_data)->minor);
-   return 0;
+   char textBuffer[32];
+   ssize_t ret = 0;
+   ssize_t remaining = 0;
+   INSTANCE_T* pInstance = (INSTANCE_T*)pFile->private_data;
+   DEBUG_MESSAGE( ": Minor-number: %d\n", pInstance->minor );
+
+
+   mutex_lock( &pInstance->oMutex );
+   ret = snprintf( textBuffer,
+                   min( sizeof( textBuffer ),
+                        userCapacity),
+                   "%d", pInstance->count );
+
+   pInstance->count = 0;
+   mutex_unlock( &pInstance->oMutex );
+
+   remaining = copy_to_user( pUserBuffer, textBuffer, ret );
+   if( remaining < 0 )
+      return -EFAULT;
+
+   *pOffset = ret;
+   return ret;
 }
 
 /*!----------------------------------------------------------------------------
@@ -151,6 +195,10 @@ static ssize_t onWrite( struct file *pFile,
    if( ret < 0 )
       return ret;
 
+   mutex_lock( &pInstance->oMutex );
+   pInstance->count = 0;
+   mutex_unlock( &pInstance->oMutex );
+
    if( period == 0 )
    {
       DEBUG_MESSAGE( "timer%d suspended\n", pInstance->minor  );
@@ -164,18 +212,7 @@ static ssize_t onWrite( struct file *pFile,
       mod_timer( &pInstance->timer, jiffies + msecs_to_jiffies( pInstance->period ) );
    }
 
-
-
    return n;
-}
-
-/*!----------------------------------------------------------------------------
- * @brief
- */
-static int onClose( struct inode *pInode, struct file* pFile )
-{
-   DEBUG_MESSAGE( ": Minor-number: %d\n", MINOR(pInode->i_rdev) );
-   return 0;
 }
 
 
@@ -188,21 +225,6 @@ static struct file_operations mg_fops =
   .write          = onWrite,
   .poll           = onPoll
 };
-
-/*!----------------------------------------------------------------------------
- * @brief Callback function of the timer
- */
-void onMyTimer( struct timer_list* pTimer )
-{
-    INSTANCE_T* pInstance = from_timer( pInstance, pTimer, timer );
-    DEBUG_MESSAGE( ": Minor-number: %d\n", pInstance->minor );
-    /*
-     * Restart the timer
-     */
-    mod_timer( pTimer, jiffies + msecs_to_jiffies( pInstance->period ) );
-    wake_up_interruptible( &pInstance->readWaitQueue );
-}
-
 
 /*!----------------------------------------------------------------------------
  * @brief Driver constructor
@@ -262,11 +284,12 @@ static int __init driverInit( void )
       }
 
       mg.instance[minor].minor = minor;
-      mg.instance[minor].period = PERIOD_MS * (minor + 1);
+      mg.instance[minor].period = ~0;
 
       init_waitqueue_head( &mg.instance[minor].readWaitQueue );
       mutex_init( &mg.instance[minor].oMutex );
       timer_setup( &mg.instance[minor].timer, onMyTimer, 0 );
+      mg.instance[minor].count = 0;
    }
 
    return 0;

@@ -7,12 +7,16 @@
 ## Author: Ulrich Becker                                                     ##
 ## Date:   02.10.2017                                                        ##
 ###############################################################################
-BASEDIR = .
 SOURCES = select-app.c
 EXE_NAME = select
 
-VPATH= $(BASEDIR)
-INCDIR = $(BASEDIR)
+BASEDIR = .
+COMMONDIR = $(BASEDIR)/../../common/
+SOURCES += $(COMMONDIR)findInstances.c
+SOURCES += $(COMMONDIR)terminalHelper.c
+
+VPATH= $(BASEDIR) $(COMMONDIR)
+INCDIR = $(BASEDIR) $(COMMONDIR)
 CFLAGS = -g -O0
 
 CC     ?=gcc
@@ -24,6 +28,7 @@ OBJDIR=.obj
 OBJ = $(addprefix $(OBJDIR)/,$(addsuffix .o,$(notdir $(basename $(SOURCES)))))
 
 .PHONY: all 
+
 all: $(EXE_NAME)
 
 $(OBJDIR):
@@ -39,5 +44,17 @@ $(EXE_NAME): $(OBJ)
 clean:
 	rm -f $(OBJDIR)/*.o $(EXE_NAME) core
 	rmdir $(OBJDIR)
-	
+
+ifdef CROSS_COMPILE
+#========== Following code sequence is for developing purposes only ===========
+
+TARGET_DEVICE_USER ?= root
+TARGET_DEVICE_IP   ?= 10.0.0.1
+TRAGET_DEVICE_DIR  ?= /root
+
+.PHONY: scp
+scp: $(EXE_NAME)
+	scp $(EXE_NAME) $(TARGET_DEVICE_USER)@$(TARGET_DEVICE_IP):$(TRAGET_DEVICE_DIR)
+
+endif # ifdef CROSS_COMPILE
 #=================================== EOF ======================================

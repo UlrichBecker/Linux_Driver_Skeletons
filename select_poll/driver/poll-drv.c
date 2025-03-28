@@ -103,22 +103,22 @@ static MODULE_GLOBAL_T mg;
  * @brief Callback function becomes invoked by the function open() from the
  *        user-space.
  */
-static int onOpen( struct inode* pInode, struct file* pInstance )
+static int onOpen( struct inode* pInode, struct file* pFile )
 {
    int instanceIndex = MINOR(pInode->i_rdev);
-   INSTANCE_T* pObject = &mg.instance[ instanceIndex ];
+   INSTANCE_T* pInstance = &mg.instance[ instanceIndex ];
 
    DEBUG_MESSAGE( ": Minor-number: %d\n", instanceIndex );
-   BUG_ON( pInstance->private_data != NULL );
+   BUG_ON( pFile->private_data != NULL );
    BUG_ON( instanceIndex >= MAX_INSTANCES );
 
-   pInstance->private_data = pObject;
+   pFile->private_data = pInstance;
 
-   if( atomic_inc_and_test( &pObject->openCount ) == 1 )
+   if( atomic_inc_and_test( &pInstance->openCount ) == 1 )
    {
-      //memset( &pObject->buffer, 0, sizeof(pObject->buffer) );
+      //memset( &pInstance->buffer, 0, sizeof(pInstance->buffer) );
    }
-   DEBUG_MESSAGE( ": Open-counter: %d\n", atomic_read( &pObject->openCount ));
+   DEBUG_MESSAGE( ": Open-counter: %d\n", atomic_read( &pInstance->openCount ));
    return 0;
 }
 
@@ -126,10 +126,10 @@ static int onOpen( struct inode* pInode, struct file* pInstance )
  * @brief Callback function becomes invoked by the function close() from the
  *        user-space.
  */
-static int onClose( struct inode *pInode, struct file* pInstance )
+static int onClose( struct inode *pInode, struct file* pFile )
 {
    DEBUG_MESSAGE( ": Minor-number: %d\n", MINOR(pInode->i_rdev) );
-   BUG_ON( pInstance->private_data == NULL );
+   BUG_ON( pFile->private_data == NULL );
    atomic_dec( &mg.instance[ MINOR(pInode->i_rdev) ].openCount );
    DEBUG_MESSAGE( "   Open-counter: %d\n", 
                   atomic_read( &mg.instance[ MINOR(pInode->i_rdev) ].openCount ));
@@ -141,54 +141,54 @@ static int onClose( struct inode *pInode, struct file* pInstance )
  *        user-space.
  * @note The kernel invokes onRead as many times till it returns 0 !!!
  */
-static ssize_t onRead( struct file* pInstance,   /*!< @see include/linux/fs.h   */
+static ssize_t onRead( struct file* pFile,       /*!< @see include/linux/fs.h   */
                        char __user* pUserBuffer, /*!< buffer to fill with data */
                        size_t userCapacity,      /*!< maximum size to copy     */
                        loff_t* pOffset )         /*!< pointer to the already copied bytes */
 {
    ssize_t remaining;
    size_t  copyLen;
-   INSTANCE_T* pObject = pInstance->private_data;
+   INSTANCE_T* pInstance = pFile->private_data;
 
    DEBUG_MESSAGE( ": userCapacity = %ld, offset = %lld\n", (long int)userCapacity, *pOffset );
-   DEBUG_ACCESSMODE( pInstance );
+   DEBUG_ACCESSMODE( pFile );
 
-   BUG_ON( pObject == NULL );
-   DEBUG_MESSAGE( "   Minor: %d\n", pObject->minor );
+   BUG_ON( pInstance == NULL );
+   DEBUG_MESSAGE( "   Minor: %d\n", pInstance->minor );
    DEBUG_MESSAGE( "   Open-counter: %d\n",
-                   atomic_read( &pObject->openCount ));
+                   atomic_read( &pInstance->openCount ));
 
-   if( (*pOffset > 0) && (pObject->index == *pOffset))
+   if( (*pOffset > 0) && (pInstance->index == *pOffset))
    {
-      pObject->index = 0;
+      pInstance->index = 0;
       *pOffset = 0;
-      wake_up_interruptible( &pObject->writeWaitQueue );
+      wake_up_interruptible( &pInstance->writeWaitQueue );
       return 0;
    }
 
-   if( pObject->index == 0 ) /* No data to read present? */
+   if( pInstance->index == 0 ) /* No data to read present? */
    {
-      if( pInstance->f_flags & O_NONBLOCK )
+      if( pFile->f_flags & O_NONBLOCK )
          return -EAGAIN; /* non blocking */
       /*!
        * @note At the first look the following code-line seems very
-       *       confusing (specially the second parameter "(pObject->index > 0)") \n
+       *       confusing (specially the second parameter "(pInstance->index > 0)") \n
        *       when we look at the enclosing if-condition of
-       *       "pObject->index == 0" above. \n
+       *       "pInstance->index == 0" above. \n
        *       But "wait_event_interruptible" isn't a function rather a macro
        *       defined in "include/linux/wait.h" \n
-       *       and "pObject" is a pointer, that means his content can be
+       *       and "pInstance" is a pointer, that means his content can be
        *       modified by a concurrent task e.g.: by a write-call.
        */
-      if( wait_event_interruptible( pObject->readWaitQueue, (pObject->index > 0) ) != 0)
+      if( wait_event_interruptible( pInstance->readWaitQueue, (pInstance->index > 0) ) != 0)
          return -ERESTARTSYS;  /* Loop */
    }
 
-   copyLen = min( userCapacity, sizeof(pObject->buffer) );
-   if( copyLen > pObject->index )
-      copyLen = pObject->index;
+   copyLen = min( userCapacity, sizeof(pInstance->buffer) );
+   if( copyLen > pInstance->index )
+      copyLen = pInstance->index;
 
-   remaining = copy_to_user( pUserBuffer, &pObject->buffer[*pOffset], copyLen - *pOffset );
+   remaining = copy_to_user( pUserBuffer, &pInstance->buffer[*pOffset], copyLen - *pOffset );
    if( remaining < 0 )
       return -EFAULT; // Data not compleaty copied.
 
@@ -202,47 +202,47 @@ static ssize_t onRead( struct file* pInstance,   /*!< @see include/linux/fs.h   
  * @brief Callback function becomes invoked by the function write() from the
  *        user-space.
  */
-static ssize_t onWrite( struct file *pInstance,
+static ssize_t onWrite( struct file *pFile,
                         const char __user* pUserBuffer,
                         size_t len,
                         loff_t* pOffset )
 {
-   INSTANCE_T* pObject = pInstance->private_data;
+   INSTANCE_T* pInstance = pFile->private_data;
 
-   BUG_ON( pObject == NULL );
+   BUG_ON( pInstance == NULL );
    DEBUG_MESSAGE( ": len = %ld, offset = %lld\n", (long int)len, *pOffset );
-   DEBUG_ACCESSMODE( pInstance );
-   DEBUG_MESSAGE( "   Minor: %d\n", pObject->minor );
+   DEBUG_ACCESSMODE( pFile );
+   DEBUG_MESSAGE( "   Minor: %d\n", pInstance->minor );
    DEBUG_MESSAGE( "   Open-counter: %d\n",
-                   atomic_read( &pObject->openCount ));
+                   atomic_read( &pInstance->openCount ));
 
-   if( pObject->index > 0 ) /* Buffer not completely read yet? */
+   if( pInstance->index > 0 ) /* Buffer not completely read yet? */
    {
-      if( pInstance->f_flags & O_NONBLOCK )
+      if( pFile->f_flags & O_NONBLOCK )
          return -EAGAIN; /* non blocking */
       /*!
        * @note At the first look the following code-line seems very
-       *       confusing (specially the second parameter "(pObject->index == 0)") \n
+       *       confusing (specially the second parameter "(pInstance->index == 0)") \n
        *       when we look at the enclosing if-condition of
-       *       "pObject->index > 0" above. \n
+       *       "pInstance->index > 0" above. \n
        *       But "wait_event_interruptible" isn't a function rather a macro
        *       defined in "include/linux/wait.h" \n
-       *       and "pObject" is a pointer, that means his content can be
+       *       and "pInstance" is a pointer, that means his content can be
        *       modified by a concurrent task e.g.: by a read-call.
        */
-      if( wait_event_interruptible( pObject->writeWaitQueue, (pObject->index == 0) ) != 0)
+      if( wait_event_interruptible( pInstance->writeWaitQueue, (pInstance->index == 0) ) != 0)
          return -ERESTARTSYS;  /* Loop */
    }
 
-   if( len > sizeof(pObject->buffer) )
-      len = sizeof(pObject->buffer);
+   if( len > sizeof(pInstance->buffer) )
+      len = sizeof(pInstance->buffer);
 
-   if( copy_from_user( pObject->buffer, pUserBuffer, len ) != 0 )
+   if( copy_from_user( pInstance->buffer, pUserBuffer, len ) != 0 )
       return -EFAULT;
 
-   pObject->index = len;
+   pInstance->index = len;
 
-   wake_up_interruptible( &pObject->readWaitQueue );
+   wake_up_interruptible( &pInstance->readWaitQueue );
 
    return len;
 }
@@ -251,25 +251,27 @@ static ssize_t onWrite( struct file *pInstance,
  * @brief Callback function becomes invoked by the function select() from the
  *        user-space.
  */
-static unsigned int onPoll( struct file* pInstance, poll_table* pPollTable )
+static unsigned int onPoll( struct file* pFile, poll_table* pPollTable )
 {
-   INSTANCE_T* pObject = pInstance->private_data;
+   INSTANCE_T* pInstance = pFile->private_data;
    unsigned int ret = 0;
 
-   BUG_ON( pObject == NULL );
+   BUG_ON( pInstance == NULL );
 
-   mutex_lock( &pObject->oMutex );
+   DEBUG_MESSAGE( ": Minor-number: %d\n", ((INSTANCE_T*)pFile->private_data)->minor );
 
-   poll_wait( pInstance, &pObject->readWaitQueue, pPollTable );
-   poll_wait( pInstance, &pObject->writeWaitQueue, pPollTable );
+   mutex_lock( &pInstance->oMutex );
 
-   if( pObject->index > 0 )
+   poll_wait( pFile, &pInstance->readWaitQueue, pPollTable );
+   poll_wait( pFile, &pInstance->writeWaitQueue, pPollTable );
+
+   if( pInstance->index > 0 )
       ret |= (POLLIN | POLLRDNORM); /* ready to read */
 
-   if( pObject->index == 0 )
+   if( pInstance->index == 0 )
       ret |= (POLLOUT | POLLWRNORM); /* ready to write */
 
-   mutex_unlock( &pObject->oMutex );
+   mutex_unlock( &pInstance->oMutex );
 
    return ret;
 }

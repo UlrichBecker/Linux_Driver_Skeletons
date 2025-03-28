@@ -25,106 +25,86 @@
 #include <sys/types.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <termios.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <errno.h>
 #include <string.h>
-
+#include <findInstances.h>
+#include <terminalHelper.h>
 #ifndef ARRAY_SIZE
  #define ARRAY_SIZE( a ) (sizeof( a ) / sizeof( a[0] ))
 #endif
 
-
+#define BASE_NAME "poll"
 
 typedef struct
 {
-   const char* pFileName;
-   int         fd;
+   char  fileName[16];
+   int   fd;
 } POLL_OBJ_T;
 
-
-#define OBJ_INITIALIZER(n)         \
-   [n] =                           \
-   {                               \
-      .pFileName = "/dev/poll" #n, \
-      .fd = -1                     \
-   }
-
-POLL_OBJ_T g_pollObjs[2]=
-{
-   OBJ_INITIALIZER(0),
-   OBJ_INITIALIZER(1)
-};
-
 char g_Buffer[1024];
-
-static struct termios g_originTerminal;
-
-/*-----------------------------------------------------------------------------
-*/
-static inline int resetTerminalInput( void )
-{
-   return tcsetattr( STDIN_FILENO, TCSANOW, &g_originTerminal );
-}
-
-/*-----------------------------------------------------------------------------
-*/
-static int prepareTerminalInput( void )
-{
-   struct termios newTerminal;
-
-   if( tcgetattr( STDIN_FILENO, &g_originTerminal ) < 0 )
-      return -1;
-
-   newTerminal = g_originTerminal;
-   newTerminal.c_lflag     &= ~(ICANON | ECHO);  /* Disable canonic mode and echo.*/
-   newTerminal.c_cc[VMIN]  = 1;  /* Reading is complete after one byte only. */
-   newTerminal.c_cc[VTIME] = 0;  /* No timer. */
-
-   return tcsetattr( STDIN_FILENO, TCSANOW, &newTerminal );
-}
 
 /*===========================================================================*/
 int main( void )
 {
    int fdMax = STDIN_FILENO;
-   fd_set rfds;
-   int inKey = 0;
    int state;
    int i;
    ssize_t readBytes;
 
    printf( "Poll-Test. Hit Esc to end.\n"
-           "Open a further console and send a message to /dev/poll0 or /dev/poll1\n"
-           "E.g.: echo \"Hello world\" > /dev/poll0\n" );
+           "Open a further console and send a message to /dev/" BASE_NAME " or /dev/" BASE_NAME "\n"
+           "E.g.: echo \"Hello world\" > /dev/" BASE_NAME "\n" );
+
+   const int numOfInstances = getNumberOfFoundDriverInstances( BASE_NAME );
+   if( numOfInstances < 0 )
+   {
+      fprintf( stderr, "ERROR: Directory not found!\n" );
+      return EXIT_FAILURE;
+   }
+   printf( "Found driver instances: %d\n", numOfInstances );
+   if( numOfInstances == 0 )
+   {
+      printf( "No driver-instance found.\n" );
+      return EXIT_SUCCESS;
+   }
+
+   POLL_OBJ_T* pUsers = malloc( numOfInstances * sizeof(POLL_OBJ_T) );
+   if( pUsers == NULL )
+   {
+      fprintf( stderr, "ERROR: Unable to allocate memory for %d instances!\n", numOfInstances );
+      return EXIT_FAILURE;
+   }
+
    if( prepareTerminalInput() != 0 )
       return EXIT_FAILURE;
 
-   for( i = 0; i < ARRAY_SIZE(g_pollObjs); i++ )
+   for( i = 0; i < numOfInstances; i++ )
    {
-      g_pollObjs[i].fd = open( g_pollObjs[i].pFileName, O_RDONLY );
-      if( g_pollObjs[i].fd > 0 )
+      snprintf( pUsers[i].fileName, ARRAY_SIZE( pUsers[0].fileName ), "/dev/" BASE_NAME "%d", i );
+      printf( "Open device: \"%s\"\n", pUsers[i].fileName );
+      pUsers[i].fd = open( pUsers[i].fileName, O_RDONLY );
+      if( pUsers[i].fd < 0 )
       {
-         if( g_pollObjs[i].fd > fdMax )
-            fdMax = g_pollObjs[i].fd;
+         fprintf( stderr, "ERROR: Unable to open device: \"%s\"\n", pUsers[i].fileName );
+         goto L_ERROR;
       }
-      else
-      {
-         fprintf( stderr, "ERROR: Could not open \"%s\" : %s\n",
-                          g_pollObjs[i].pFileName,
-                          strerror( errno ) );
-      }
+      if( pUsers[i].fd > fdMax )
+         fdMax = pUsers[i].fd;
    }
    fdMax++;
+
+   fd_set rfds;
+   int inKey = 0;
    do
    {
       FD_ZERO( &rfds );
       FD_SET( STDIN_FILENO, &rfds );
-      for( i = 0; i < ARRAY_SIZE(g_pollObjs); i++ )
+      for( i = 0; i < numOfInstances; i++ )
       {
-         if( g_pollObjs[i].fd > 0 )
-            FD_SET( g_pollObjs[i].fd, &rfds );
+         if( pUsers[i].fd > 0 )
+            FD_SET( pUsers[i].fd, &rfds );
       }
       state = select( fdMax, &rfds, NULL, NULL, NULL );
       if( state < 0 )
@@ -132,21 +112,21 @@ int main( void )
       if( state == 0 )
          continue;
 
-      for( i = 0; i < ARRAY_SIZE(g_pollObjs); i++ )
+      for( i = 0; i < numOfInstances; i++ )
       {
-         if( (g_pollObjs[i].fd > 0) && FD_ISSET( g_pollObjs[i].fd, &rfds ))
+         if( (pUsers[i].fd > 0) && FD_ISSET( pUsers[i].fd, &rfds ))
          {
-            readBytes = read( g_pollObjs[i].fd, g_Buffer, sizeof(g_Buffer) );
+            readBytes = read( pUsers[i].fd, g_Buffer, sizeof(g_Buffer) );
             if( readBytes < 0 )
             {
                fprintf( stderr, "ERROR: unable to read from \"%s\": %s\n",
-                                g_pollObjs[i].pFileName,
+                                pUsers[i].fileName,
                                 strerror( errno ) );
                continue;
             }
             if( readBytes > 0 )
             {
-               printf( "%s: ", g_pollObjs[i].pFileName );
+               printf( "%s: ", pUsers[i].fileName );
                fflush( NULL );
                write( STDOUT_FILENO, g_Buffer, readBytes );
                if( (readBytes > 1) && (g_Buffer[readBytes-1] != '\n') )
@@ -170,11 +150,15 @@ int main( void )
    }
    while( inKey != '\e' );
 
-   for( i = 0; i < ARRAY_SIZE(g_pollObjs); i++ )
+L_ERROR:
+   for( i = 0; i < numOfInstances; i++ )
    {
-      if( g_pollObjs[i].fd > 0 )
-         close( g_pollObjs[i].fd );
-   } 
+      if( pUsers[i].fd < 0 )
+         continue;
+      printf( "Close device: \"%s\"\n", pUsers[i].fileName );
+      close( pUsers[i].fd );
+   }
+   free( pUsers );
    resetTerminalInput();
    return EXIT_SUCCESS;
 }

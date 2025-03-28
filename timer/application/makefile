@@ -7,14 +7,18 @@
 ## Author: Ulrich Becker                                                     ##
 ## Date:   16.03.2025                                                        ##
 ###############################################################################
-BASEDIR = .
 SOURCES = on-timer.c
 EXE_NAME = on-timer
 
-VPATH= $(BASEDIR)
-INCDIR = $(BASEDIR)
-CFLAGS = -g -O0
+BASEDIR = .
+COMMONDIR = $(BASEDIR)/../../common/
+SOURCES += $(COMMONDIR)findInstances.c
+SOURCES += $(COMMONDIR)terminalHelper.c
 
+VPATH= $(BASEDIR) $(COMMONDIR)
+INCDIR = $(BASEDIR) $(COMMONDIR)
+
+CFLAGS = -g -O0
 CC     ?=gcc
 CFLAGS += $(addprefix -I,$(INCDIR))
 
