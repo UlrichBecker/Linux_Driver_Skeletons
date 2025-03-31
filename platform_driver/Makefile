@@ -1,17 +1,17 @@
 ###############################################################################
 ##                                                                           ##
-##            Makefile for the example of a kernel-timer                     ##
+##            Makefile for the example of a simple platform-driver           ##
 ##                                                                           ##
 ##---------------------------------------------------------------------------##
-## File:   Linux_Driver_Skeletons/timer/driver/Makefile                      ##
+## File:   Linux_Driver_Skeletons/platform_driver/Makefile                   ##
 ## Author: Ulrich Becker                                                     ##
-## Date:   25.03.1925                                                        ##
+## Date:   31.03.1925                                                        ##
 ###############################################################################
-TARGET_NAME := timer
-SOURCES := timer-drv.c
+TARGET_NAME := platform
+SOURCES := platform-example.c
 
 
-CONFIG_TIMER_DRV ?= m
+CONFIG_PLATFORM_DRV ?= m
 CONFIG_FEATURE_X := y
 
 ccflags-$(CONFIG_FEATURE_X) := -Wno-declaration-after-statement -std=gnu99
@@ -22,7 +22,7 @@ ifdef KERNELRELEASE
       #EXTRA_CFLAGS += $(addprefix -D, $(DEFINES))
       ccflags-y += $(addprefix -D, $(DEFINES))
    endif
-   obj-$(CONFIG_TIMER_DRV) += $(TARGET_NAME).o
+   obj-$(CONFIG_PLATFORM_DRV) += $(TARGET_NAME).o
    ifdef SOURCES
       $(TARGET_NAME)-objs := $(patsubst %.c, %.o, $(SOURCES))
    endif

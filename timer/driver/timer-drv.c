@@ -231,8 +231,9 @@ static struct file_operations mg_fops =
  */
 static int __init driverInit( void )
 {
-   unsigned int minor, currentMinor;
    DEBUG_MESSAGE("\n");
+   unsigned int minor, currentMinor;
+
 
    if( alloc_chrdev_region( &mg.deviceNumber, 0, MAX_INSTANCES, DEVICE_BASE_FILE_NAME ) < 0 )
    {
