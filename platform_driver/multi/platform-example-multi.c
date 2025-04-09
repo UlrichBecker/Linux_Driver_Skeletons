@@ -1,6 +1,10 @@
 #include <linux/version.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
+#include <linux/miscdevice.h>
+#include <linux/uaccess.h>
+#include <linux/fs.h>
+#include <linux/io.h>
 #include <linux/of.h>
 
 MODULE_LICENSE( "GPL" );
@@ -29,11 +33,109 @@ MODULE_LICENSE( "GPL" );
 #define INFO_MESSAGE( constStr, n... ) \
    printk( KERN_INFO DEVICE_BASE_FILE_NAME ": " constStr, ## n )
 /* End of message helper macros for "dmesg" ++++++++***************************/
+
+
+#define MAX_INSTANCES 1
+#define NAME_LEN 32
+
+struct MY_DEVICE
+{
+    unsigned int myValue;
+    struct miscdevice miscdev;
+    char name[NAME_LEN];
+};
+
+struct GLOBAL_T
+{
+   unsigned int maxInstances;
+   struct MY_DEVICE* pMyDevices;
+};
+
+struct GLOBAL_T global =
+{
+    .maxInstances = MAX_INSTANCES,
+    .pMyDevices = NULL
+};
+
+static ssize_t onRead( struct file* pFile,   /*!< @see include/linux/fs.h   */
+                       char __user* pUserBuffer, /*!< buffer to fill with data */
+                       size_t userCapacity,      /*!< maximum size to copy     */
+                       loff_t* pOffset )         /*!< pointer to the already copied bytes */
+{
+    return 0;
+}
+
+/*-----------------------------------------------------------------------------
+ */
+static ssize_t onWrite( struct file *pFile,
+                        const char __user* pUserBuffer,
+                        size_t len,
+                        loff_t* pOffset )
+{
+   return 0;
+}
+
+/*-----------------------------------------------------------------------------
+ */
+static int onOpen( struct inode* pInode, struct file* pFile )
+{
+    DEBUG_MESSAGE( ": Minor-number: %d\n", MINOR(pInode->i_rdev) );
+    return 0;
+}
+
+/*-----------------------------------------------------------------------------
+ */
+static int onClose( struct inode *pInode, struct file* pFile )
+{
+   DEBUG_MESSAGE( ": Minor-number: %d\n", MINOR(pInode->i_rdev) );
+   return 0;
+}
+
+static struct file_operations mg_fops =
+{
+  .owner          = THIS_MODULE,
+  .open           = onOpen,
+  .release        = onClose,
+  .read           = onRead,
+  .write          = onWrite,
+};
+
 /*-----------------------------------------------------------------------------
  */
 static int onProbe( struct platform_device* pPdev )
 {
     DEBUG_MESSAGE( "%s\n", pPdev->name );
+
+    struct MY_DEVICE* pMyDevice = devm_kzalloc( &pPdev->dev,
+                                                sizeof(struct MY_DEVICE) * global.maxInstances,
+                                                GFP_KERNEL );
+    if( pMyDevice == NULL )
+    {
+       ERROR_MESSAGE( "devm_kzalloc\n" );
+       return -ENOMEM;
+    }
+
+    for( int i = 0; i < global.maxInstances; i++ )
+    {
+       pMyDevice[i].miscdev.minor = i;
+       snprintf( pMyDevice[i].name, sizeof(pMyDevice[0].name),
+                 DEVICE_BASE_FILE_NAME "%d", i  );
+       pMyDevice[i].miscdev.name = pMyDevice[i].name;
+       pMyDevice[i].miscdev.fops = &mg_fops;
+       pMyDevice[i].myValue = 4711 + i;
+       if( misc_register( &pMyDevice[i].miscdev ) != 0 )
+       {
+          ERROR_MESSAGE( "misc_register\n" );
+          for( int j = 0; j < i; j++ )
+          {
+             misc_deregister( &pMyDevice[i].miscdev );
+          }
+          return -ENODEV;
+       }
+    }
+
+    platform_set_drvdata( pPdev, pMyDevice );
+    DEBUG_MESSAGE( "minor: %d\n", pMyDevice->miscdev.minor );
     return 0;
 }
 
@@ -42,6 +144,12 @@ static int onProbe( struct platform_device* pPdev )
 static int onRemove( struct platform_device *pPdev )
 {
     DEBUG_MESSAGE( "%s\n", pPdev->name );
+    struct MY_DEVICE* pMyDevice = platform_get_drvdata( pPdev );
+    for( int i = 0; i < global.maxInstances; i++ )
+    {
+       INFO_MESSAGE( "myValue: %d\n", pMyDevice[i].myValue );
+       misc_deregister( &pMyDevice[i].miscdev );
+    }
     return 0;
 }
 
@@ -91,8 +199,8 @@ int onResume( struct platform_device* pPdev )
 static const struct of_device_id g_ofMatchList[] =
 {
     { .compatible = "my,driver" },
-    { .compatible = "i2c-gpio" },
-    { }
+    { .compatible = "gsi-eps,timer_irq" },
+    {}
 };
 
 MODULE_DEVICE_TABLE( of, g_ofMatchList );

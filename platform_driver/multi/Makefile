@@ -1,14 +1,15 @@
 ###############################################################################
 ##                                                                           ##
-##            Makefile for the example of a simple platform-driver           ##
+##         Makefile for the example of a simple platform-driver with         ##
+##                          multible instances                               ##
 ##                                                                           ##
 ##---------------------------------------------------------------------------##
-## File:   Linux_Driver_Skeletons/platform_driver/Makefile                   ##
+## File:   Linux_Driver_Skeletons/platform_driver/multi/Makefile             ##
 ## Author: Ulrich Becker                                                     ##
-## Date:   31.03.1925                                                        ##
+## Date:   09.04.2025                                                        ##
 ###############################################################################
-TARGET_NAME := platform
-SOURCES := platform-example.c
+TARGET_NAME := platform-multi
+SOURCES := platform-example-multi.c
 
 
 CONFIG_PLATFORM_DRV ?= m
