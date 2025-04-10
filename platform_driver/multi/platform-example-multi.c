@@ -35,12 +35,13 @@ MODULE_LICENSE( "GPL" );
 /* End of message helper macros for "dmesg" ++++++++***************************/
 
 
-#define MAX_INSTANCES 1
+#define MAX_INSTANCES 5
 #define NAME_LEN 32
 
-struct MY_DEVICE
+struct MY_INSTANCE_T
 {
     unsigned int myValue;
+    unsigned int instanceNumber;
     struct miscdevice miscdev;
     char name[NAME_LEN];
 };
@@ -48,21 +49,26 @@ struct MY_DEVICE
 struct GLOBAL_T
 {
    unsigned int maxInstances;
-   struct MY_DEVICE* pMyDevices;
+   struct MY_INSTANCE_T* pMyInstances;
 };
 
-struct GLOBAL_T global =
+static struct GLOBAL_T global =
 {
     .maxInstances = MAX_INSTANCES,
-    .pMyDevices = NULL
+    .pMyInstances = NULL
 };
 
-static ssize_t onRead( struct file* pFile,   /*!< @see include/linux/fs.h   */
+/*-----------------------------------------------------------------------------
+ */
+static ssize_t onRead( struct file* pFile,       /*!< @see include/linux/fs.h   */
                        char __user* pUserBuffer, /*!< buffer to fill with data */
                        size_t userCapacity,      /*!< maximum size to copy     */
                        loff_t* pOffset )         /*!< pointer to the already copied bytes */
 {
-    return 0;
+   DEBUG_MESSAGE( "minor: %d\n", ((struct miscdevice*)pFile->private_data)->minor );
+   struct MY_INSTANCE_T* pMyInstances = container_of( pFile->private_data, struct MY_INSTANCE_T, miscdev );
+   DEBUG_MESSAGE( "instance: %d, myValue: %d", pMyInstances->instanceNumber, pMyInstances->myValue );
+   return 0;
 }
 
 /*-----------------------------------------------------------------------------
@@ -72,14 +78,26 @@ static ssize_t onWrite( struct file *pFile,
                         size_t len,
                         loff_t* pOffset )
 {
+   DEBUG_MESSAGE( "minor: %d\n", ((struct miscdevice*)pFile->private_data)->minor );
+
+   struct MY_INSTANCE_T* pMyInstances = container_of( pFile->private_data, struct MY_INSTANCE_T, miscdev );
+   DEBUG_MESSAGE( "instance: %d, myValue: %d", pMyInstances->instanceNumber, pMyInstances->myValue );
+
    return 0;
 }
 
 /*-----------------------------------------------------------------------------
  */
 static int onOpen( struct inode* pInode, struct file* pFile )
-{
+{  /*
+    * Initializing of pFile->private_data is not necessary by misc-drivers
+    * the kernel will initializing it with the pointer to struct miscdevice.
+    */
     DEBUG_MESSAGE( ": Minor-number: %d\n", MINOR(pInode->i_rdev) );
+
+    struct MY_INSTANCE_T* pMyInstances = container_of( pFile->private_data, struct MY_INSTANCE_T, miscdev );
+    DEBUG_MESSAGE( "instance: %d, myValue: %d", pMyInstances->instanceNumber, pMyInstances->myValue );
+
     return 0;
 }
 
@@ -88,6 +106,10 @@ static int onOpen( struct inode* pInode, struct file* pFile )
 static int onClose( struct inode *pInode, struct file* pFile )
 {
    DEBUG_MESSAGE( ": Minor-number: %d\n", MINOR(pInode->i_rdev) );
+
+   struct MY_INSTANCE_T* pMyInstances = container_of( pFile->private_data, struct MY_INSTANCE_T, miscdev );
+   DEBUG_MESSAGE( "instance: %d, myValue: %d", pMyInstances->instanceNumber, pMyInstances->myValue );
+
    return 0;
 }
 
@@ -106,36 +128,53 @@ static int onProbe( struct platform_device* pPdev )
 {
     DEBUG_MESSAGE( "%s\n", pPdev->name );
 
-    struct MY_DEVICE* pMyDevice = devm_kzalloc( &pPdev->dev,
-                                                sizeof(struct MY_DEVICE) * global.maxInstances,
+    /*
+     * Probing hardware here...
+     */
+
+    /*
+     * The value of global.maxInstances could be obtained from a proberty
+     * of the device-tree.
+     */
+
+    struct MY_INSTANCE_T* pMyInstances = devm_kzalloc( &pPdev->dev,
+                                                sizeof(struct MY_INSTANCE_T) * global.maxInstances,
                                                 GFP_KERNEL );
-    if( pMyDevice == NULL )
+    if( pMyInstances == NULL )
     {
        ERROR_MESSAGE( "devm_kzalloc\n" );
        return -ENOMEM;
     }
 
+    BUG_ON( sizeof(pMyInstances[0].name) <= strlen(DEVICE_BASE_FILE_NAME) + 2 );
+
     for( int i = 0; i < global.maxInstances; i++ )
     {
-       pMyDevice[i].miscdev.minor = i;
-       snprintf( pMyDevice[i].name, sizeof(pMyDevice[0].name),
+       pMyInstances[i].instanceNumber = i;
+       pMyInstances[i].miscdev.minor = MISC_DYNAMIC_MINOR;
+       snprintf( pMyInstances[i].name, sizeof(pMyInstances[0].name),
                  DEVICE_BASE_FILE_NAME "%d", i  );
-       pMyDevice[i].miscdev.name = pMyDevice[i].name;
-       pMyDevice[i].miscdev.fops = &mg_fops;
-       pMyDevice[i].myValue = 4711 + i;
-       if( misc_register( &pMyDevice[i].miscdev ) != 0 )
+       pMyInstances[i].miscdev.name = pMyInstances[i].name;
+       pMyInstances[i].miscdev.fops = &mg_fops;
+       pMyInstances[i].myValue = 4711 + i;
+       if( misc_register( &pMyInstances[i].miscdev ) != 0 )
        {
           ERROR_MESSAGE( "misc_register\n" );
           for( int j = 0; j < i; j++ )
           {
-             misc_deregister( &pMyDevice[i].miscdev );
+             DEBUG_MESSAGE( "Removing: instance %d, minor: %d\n", j, pMyInstances[j].miscdev.minor );
+             misc_deregister( &pMyInstances[j].miscdev );
           }
           return -ENODEV;
        }
+       DEBUG_MESSAGE( "Instance: %d, minor: %d has been created\n", i, pMyInstances[i].miscdev.minor );
     }
 
-    platform_set_drvdata( pPdev, pMyDevice );
-    DEBUG_MESSAGE( "minor: %d\n", pMyDevice->miscdev.minor );
+    /*
+     * Don't forget this! ;-)
+     */
+    platform_set_drvdata( pPdev, pMyInstances );
+
     return 0;
 }
 
@@ -144,11 +183,12 @@ static int onProbe( struct platform_device* pPdev )
 static int onRemove( struct platform_device *pPdev )
 {
     DEBUG_MESSAGE( "%s\n", pPdev->name );
-    struct MY_DEVICE* pMyDevice = platform_get_drvdata( pPdev );
+    struct MY_INSTANCE_T* pMyInstances = platform_get_drvdata( pPdev );
     for( int i = 0; i < global.maxInstances; i++ )
     {
-       INFO_MESSAGE( "myValue: %d\n", pMyDevice[i].myValue );
-       misc_deregister( &pMyDevice[i].miscdev );
+       INFO_MESSAGE( "myValue: %d\n", pMyInstances[i].myValue );
+       DEBUG_MESSAGE( "Removing instance: %d, minor: %d\n", i, pMyInstances[i].miscdev.minor );
+       misc_deregister( &pMyInstances[i].miscdev );
     }
     return 0;
 }

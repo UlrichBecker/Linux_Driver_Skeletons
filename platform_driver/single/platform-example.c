@@ -97,7 +97,7 @@ static int onProbe( struct platform_device* pPdev )
        return -ENOMEM;
     }
 
-    pMyDevice->miscdev.minor = 0; //MISC_DYNAMIC_MINOR;
+    pMyDevice->miscdev.minor = MISC_DYNAMIC_MINOR;
     pMyDevice->miscdev.name = DEVICE_BASE_FILE_NAME;
     pMyDevice->miscdev.fops = &mg_fops;
     pMyDevice->myValue = 4711;

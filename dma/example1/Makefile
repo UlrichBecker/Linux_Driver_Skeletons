@@ -1,18 +1,17 @@
 ###############################################################################
 ##                                                                           ##
-##         Makefile for the example of a simple platform-driver with         ##
-##                          multible instances                               ##
+##            Makefile for a imple test driver for DMA accesses              ##
 ##                                                                           ##
 ##---------------------------------------------------------------------------##
-## File:   Linux_Driver_Skeletons/platform_driver/multi/Makefile             ##
+## File:   dma/Makefile                                                      ##
 ## Author: Ulrich Becker                                                     ##
-## Date:   09.04.2025                                                        ##
+## Date:   03.04.2025                                                        ##
 ###############################################################################
-TARGET_NAME := platform-multi
-SOURCES := platform-example-multi.c
+TARGET_NAME := dmatest
+SOURCES := dma-test.c
 
 
-CONFIG_PLATFORM_DRV ?= m
+CONFIG_SKELETON ?= m
 CONFIG_FEATURE_X := y
 
 ccflags-$(CONFIG_FEATURE_X) := -Wno-declaration-after-statement -std=gnu99
@@ -21,9 +20,8 @@ ifdef KERNELRELEASE
    # This code-segment becomes invoked from the kernels master-makefile.
    ifdef DEFINES
       EXTRA_CFLAGS += $(addprefix -D, $(DEFINES))
-      ccflags-y += $(addprefix -D, $(DEFINES))
    endif
-   obj-$(CONFIG_PLATFORM_DRV) += $(TARGET_NAME).o
+   obj-$(CONFIG_SKELETON) += $(TARGET_NAME).o
    ifdef SOURCES
       $(TARGET_NAME)-objs := $(patsubst %.c, %.o, $(SOURCES))
    endif
@@ -62,7 +60,7 @@ checkKernelDir:
 	fi
 
 clean:
-	rm -f *.mod.c *.o *.ko modules.order Module.symvers .*.cmd .tmp_versions/* *.livepatch $(TARGET_NAME).mod
+	rm -f *.mod.c *.o *.rc .*.d *.ko modules.order Module.symvers .*.cmd .tmp_versions/* *.livepatch $(TARGET_NAME).mod
 	rmdir .tmp_versions
 
 status:

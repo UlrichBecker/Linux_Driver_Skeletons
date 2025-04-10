@@ -1,17 +1,21 @@
 ###############################################################################
 ##                                                                           ##
-##            Makefile for a imple test driver for DMA accesses              ##
+##        Makefile for a simple test driver for DMA accesses and             ##
+##                      transfer to user-space                               ##
 ##                                                                           ##
 ##---------------------------------------------------------------------------##
-## File:   dma/Makefile                                                      ##
+## File:   dma/example2/Makefile                                             ##
 ## Author: Ulrich Becker                                                     ##
-## Date:   03.04.2025                                                        ##
+## Date:   10.04.2025                                                        ##
 ###############################################################################
-TARGET_NAME := dmatest
-SOURCES := dma-test.c
+TARGET_NAME := dmatest-user
+SOURCES := dma-test-user.c
 
 
 CONFIG_SKELETON ?= m
+CONFIG_FEATURE_X := y
+
+ccflags-$(CONFIG_FEATURE_X) := -Wno-declaration-after-statement -std=gnu99
 
 ifdef KERNELRELEASE
    # This code-segment becomes invoked from the kernels master-makefile.
