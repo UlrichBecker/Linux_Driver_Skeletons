@@ -126,7 +126,7 @@ static struct file_operations mg_fops =
  */
 static int onProbe( struct platform_device* pPdev )
 {
-    DEBUG_MESSAGE( "%s\n", pPdev->name );
+    DEBUG_MESSAGE( "Platform-device name: \"%s\"\n", pPdev->name );
 
     /*
      * Probing hardware here...
@@ -148,6 +148,9 @@ static int onProbe( struct platform_device* pPdev )
 
     BUG_ON( sizeof(pMyInstances[0].name) <= strlen(DEVICE_BASE_FILE_NAME) + 2 );
 
+    /*
+     * Creating all instances in /dev/
+     */
     for( int i = 0; i < global.maxInstances; i++ )
     {
        pMyInstances[i].instanceNumber = i;
@@ -182,7 +185,7 @@ static int onProbe( struct platform_device* pPdev )
  */
 static int onRemove( struct platform_device *pPdev )
 {
-    DEBUG_MESSAGE( "%s\n", pPdev->name );
+    DEBUG_MESSAGE( "Platform-device name: \"%s\"\n", pPdev->name );
     struct MY_INSTANCE_T* pMyInstances = platform_get_drvdata( pPdev );
     for( int i = 0; i < global.maxInstances; i++ )
     {
