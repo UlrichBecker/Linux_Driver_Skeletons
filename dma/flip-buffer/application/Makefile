@@ -7,8 +7,8 @@
 ## Author: Ulrich Becker                                                     ##
 ## Date:   02.10.2017                                                        ##
 ###############################################################################
-SOURCES =   mmap-test.c
-EXE_NAME =  mmaptest
+SOURCES =   flip-app.c
+EXE_NAME =  fliptest
 
 BASEDIR = .
 COMMONDIR = $(BASEDIR)/../../../common/
@@ -16,7 +16,7 @@ COMMONDIR = $(BASEDIR)/../../../common/
 SOURCES += $(COMMONDIR)terminalHelper.c
 
 VPATH= $(BASEDIR) $(COMMONDIR)
-INCDIR = $(BASEDIR) $(COMMONDIR)
+INCDIR = $(BASEDIR) $(COMMONDIR) ./..
 CFLAGS = -g -O0
 
 CC     ?=gcc

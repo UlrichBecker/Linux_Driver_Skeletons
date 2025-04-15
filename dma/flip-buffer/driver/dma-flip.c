@@ -19,13 +19,13 @@
 #include <linux/mutex.h>
 #include <linux/kthread.h>
 #include <linux/delay.h>
+#include <linux/poll.h>
 #include <linux/dma-mapping.h>
 
 #include <flip_dma_ctl.h>
 
-#define CLASS_NAME  "dmaflipclass"
-#define BUFFER_SIZE PAGE_SIZE
-#define NUM_BUFFERS 2
+#define CLASS_NAME  DEVICE_NAME "class"
+
 
 MODULE_LICENSE("GPL");
 
@@ -59,6 +59,7 @@ MODULE_LICENSE("GPL");
 struct DMA_FLIP_BUFFER_T
 {
    unsigned int readyIndex;
+   unsigned int dataReady;
    void*        pDmaBuffers[NUM_BUFFERS];
    dma_addr_t   dmaHandlers[NUM_BUFFERS];
 };
@@ -71,55 +72,71 @@ struct GLOBAL_T
    int                      major;
    struct task_struct*      pThread;
    struct mutex             dmaFlipMutex;
+   wait_queue_head_t        waitFlipQueue;
    struct DMA_FLIP_BUFFER_T oDmaFlip;
 };
 
 static struct GLOBAL_T global =
 {
    .oDmaFlip.readyIndex = 0,
+   .oDmaFlip.dataReady = 0
 };
 
-// mmap: Einfache Methode: 0 = beide Puffer werden direkt nacheinander gemappt
 /*-----------------------------------------------------------------------------
  */
 static int onMmap( struct file* pFile, struct vm_area_struct* pVma)
 {
    DEBUG_MESSAGE( "\n" );
    const unsigned long len = pVma->vm_end - pVma->vm_start;
-   if( len > NUM_BUFFERS * BUFFER_SIZE )
-      return -EINVAL;
-
-   for( int i = 0; i < NUM_BUFFERS; i++ )
+   if( len > (NUM_BUFFERS * BUFFER_SIZE) )
    {
-      int ret = dma_mmap_coherent( global.pDmaDevice, pVma,
-                                   global.oDmaFlip.pDmaBuffers[i],
-                                   global.oDmaFlip.dmaHandlers[i],
-                                   BUFFER_SIZE );
-      if( ret != 0 )
-      {
-         ERROR_MESSAGE("dma_mmap_coherent failed: %d\n", ret );
-         return ret;
-      }
-      pVma->vm_start += BUFFER_SIZE;
+      ERROR_MESSAGE( "Data size is too large!\n" );
+      return -EINVAL;
    }
 
+   int ret = dma_mmap_coherent( global.pDmaDevice, pVma,
+                                global.oDmaFlip.pDmaBuffers[0],
+                                global.oDmaFlip.dmaHandlers[0],
+                                BUFFER_SIZE * NUM_BUFFERS );
+   if( ret != 0 )
+   {
+      ERROR_MESSAGE( "dma_mmap_coherent failed: %d\n", ret );
+   }
+   return ret;
+}
+
+/*-----------------------------------------------------------------------------
+ */
+static unsigned int onPoll( struct file* pFile, poll_table* pPollTable )
+{
+   DEBUG_MESSAGE( "\n" );
+   poll_wait( pFile, &global.waitFlipQueue, pPollTable );
+   if( global.oDmaFlip.dataReady != 0 )
+      return POLLIN | POLLRDNORM;
    return 0;
 }
 
 /*-----------------------------------------------------------------------------
  */
-static long onIoctl( struct file *file, unsigned int cmd, unsigned long arg )
+static long onIoctl( struct file* pFile, unsigned int cmd, unsigned long arg )
 {
    DEBUG_MESSAGE( "\n" );
    if( cmd == DMAFLIP_IOCTL_GET_READY )
    {
       mutex_lock( &global.dmaFlipMutex );
-      if( copy_to_user( (int __user *)arg, &global.oDmaFlip.readyIndex, sizeof(int)) != 0 )
+      if( global.oDmaFlip.dataReady == 0 )
+      {
+         mutex_unlock( &global.dmaFlipMutex );
+         return -EAGAIN;
+      }
+      unsigned int readIndex = (global.oDmaFlip.readyIndex + 1) % NUM_BUFFERS;
+      if( copy_to_user( (unsigned int __user *)arg, &readIndex, sizeof(readIndex)) != 0 )
       {
          mutex_unlock( &global.dmaFlipMutex );
          ERROR_MESSAGE( "copy_to_user\n" );
          return -EFAULT;
       }
+      global.oDmaFlip.dataReady = 0;
       mutex_unlock( &global.dmaFlipMutex );
       return 0;
    }
@@ -150,11 +167,12 @@ static const struct file_operations dmaflip_fops =
    .unlocked_ioctl = onIoctl,
    .open           = onOpen,
    .release        = onClose,
+   .poll           = onPoll
 };
 
 /*-----------------------------------------------------------------------------
  */
-static int threadFunction(void *data)
+static int threadFunction( void* pData )
 {
    int count = 0;
    DEBUG_MESSAGE( " Thread started!\n" );
@@ -162,10 +180,11 @@ static int threadFunction(void *data)
    {  /*
        * write into the inactive buffer.
        */
-      int readyIndex = global.oDmaFlip.readyIndex ^ 1;
+      int readyIndex = global.oDmaFlip.readyIndex;
 
+      readyIndex = (readyIndex + 1) % NUM_BUFFERS;
       snprintf( global.oDmaFlip.pDmaBuffers[readyIndex], BUFFER_SIZE,
-                "DMA-Buffer %d full, count = %d\n", readyIndex, count++ );
+                "DMA-Buffer %d full, count = %d", readyIndex, count++ );
 
       mutex_lock( &global.dmaFlipMutex );
       global.oDmaFlip.readyIndex = readyIndex;
@@ -175,8 +194,9 @@ static int threadFunction(void *data)
        * Simulating execution-time.
        */
       ssleep( 1 );
+      global.oDmaFlip.dataReady = 1;
+      wake_up_interruptible( &global.waitFlipQueue );
    }
-
    DEBUG_MESSAGE( " Thread terminated!\n" );
    return 0;
 }
@@ -187,8 +207,11 @@ static int __init onInit( void )
 {
    dev_t dev;
    int ret;
+
    mutex_init( &global.dmaFlipMutex );
-   ret = alloc_chrdev_region(&dev, 0, 1, DEVICE_NAME);
+   init_waitqueue_head( &global.waitFlipQueue );
+
+   ret = alloc_chrdev_region( &dev, 0, 1, DEVICE_NAME );
    if( ret < 0 )
       return ret;
    global.major = MAJOR(dev);
@@ -203,20 +226,16 @@ static int __init onInit( void )
       global.pDmaDevice->dma_mask = &global.pDmaDevice->coherent_dma_mask;
    global.pDmaDevice->coherent_dma_mask = DMA_BIT_MASK(32);
 
-   for( int i = 0; i < NUM_BUFFERS; i++ )
+   global.oDmaFlip.pDmaBuffers[0] = dma_alloc_coherent( global.pDmaDevice,
+                                                        BUFFER_SIZE * NUM_BUFFERS,
+                                                        &global.oDmaFlip.dmaHandlers[0], GFP_KERNEL );
+   if( global.oDmaFlip.pDmaBuffers[0] == NULL )
    {
-      global.oDmaFlip.pDmaBuffers[i] = dma_alloc_coherent( global.pDmaDevice, BUFFER_SIZE,
-                                                           &global.oDmaFlip.dmaHandlers[i], GFP_KERNEL);
-       if( global.oDmaFlip.pDmaBuffers[i] == NULL )
-       {
-          for( int j = 0; j < i; j++ )
-          {
-             dma_free_coherent(global.pDmaDevice, BUFFER_SIZE, global.oDmaFlip.pDmaBuffers[j], global.oDmaFlip.dmaHandlers[j]);
-          }
-          ERROR_MESSAGE( "dma_alloc_coherent" );
-          return -ENOMEM;
-       }
+      ERROR_MESSAGE( "dma_alloc_coherent" );
+      return -ENOMEM;
    }
+   global.oDmaFlip.pDmaBuffers[1] = global.oDmaFlip.pDmaBuffers[0] + BUFFER_SIZE;
+   global.oDmaFlip.dmaHandlers[1] = global.oDmaFlip.dmaHandlers[0] + BUFFER_SIZE;
 
    global.pThread = kthread_run( threadFunction, NULL, "dmaflip_writer" );
    if( IS_ERR( global.pThread ) )
@@ -234,10 +253,8 @@ static void __exit onExit(void)
 {
    kthread_stop( global.pThread );
 
-   for (int i = 0; i < NUM_BUFFERS; i++)
-   {
-      dma_free_coherent( global.pDmaDevice, BUFFER_SIZE, global.oDmaFlip.pDmaBuffers[i], global.oDmaFlip.dmaHandlers[i]);
-   }
+   dma_free_coherent( global.pDmaDevice, BUFFER_SIZE * NUM_BUFFERS,
+                      global.oDmaFlip.pDmaBuffers[0], global.oDmaFlip.dmaHandlers[0]);
 
    device_destroy( global.pDmaflipClass, MKDEV(global.major, 0) );
    class_destroy( global.pDmaflipClass );

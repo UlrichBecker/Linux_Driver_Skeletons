@@ -1,45 +1,92 @@
+/*****************************************************************************/
+/*                                                                           */
+/*! @brief Application part in user-space for testing the dma-flip driver    */
+/*!        dmaflip.ko                                                        +/
+/*                                                                           */
+/*---------------------------------------------------------------------------*/
+/*! @file   flip-app.c                                                       */
+/*! @author Ulrich Becker                                                    */
+/*! @date   15.04.2025                                                       */
+/*****************************************************************************/
 #include <stdio.h>
-#include <stdio.h>
-#include <fcntl.h>
-#include <sys/ioctl.h>
-#include <sys/mman.h>
-#include <unistd.h>
+#include <errno.h>
+#include <stdlib.h>
+#include <terminalHelper.h>
+#include <flip_dma_ctl.h>
 
-#define BUFFER_SIZE 4096
-#define DMAFLIP_IOCTL_GET_READY _IOR('D', 1, int)
+#define DEV_FILE "/dev/" DEVICE_NAME
 
-int main()
+int main( void )
 {
-    int fd = open("/dev/dmaflip", O_RDONLY);
-    if (fd < 0)
-    {
-        perror("open");
-        return 1;
-    }
+   printf( "DMA memory map flip test\n"
+           "Press Esc for end.\n"
+           "opening devicefile: " DEV_FILE "\n" );
+   const int fd = open( DEV_FILE, O_RDONLY );
+   if( fd < 0 )
+   {
+      perror( "open" DEV_FILE );
+      return EXIT_FAILURE;
+   }
 
-    char *mapped = mmap(NULL, BUFFER_SIZE * 2, PROT_READ, MAP_SHARED, fd, 0);
-    if( mapped == MAP_FAILED )
-    {
-        perror("mmap");
-        return 1;
-    }
+   void* pMappedMems[NUM_BUFFERS];
+   pMappedMems[0] = mmap( NULL, BUFFER_SIZE * NUM_BUFFERS, PROT_READ, MAP_SHARED, fd, 0 );
+   if( pMappedMems[0] == MAP_FAILED )
+   {
+      perror("mmap");
+      return EXIT_FAILURE;
+   }
+   pMappedMems[1] = pMappedMems[0] + BUFFER_SIZE;
 
-    for( int i = 0; i < 10; i++ )
-    {
-        int ready;
-        if( ioctl( fd, DMAFLIP_IOCTL_GET_READY, &ready) < 0 )
-        {
+   if( prepareTerminalInput() != 0 )
+      return EXIT_FAILURE;
+
+   int fdMax = STDIN_FILENO;
+   if( fdMax < fd )
+      fdMax = fd;
+   fdMax++;
+
+   fd_set rfds;
+   int inKey = 0;
+   do
+   {
+      FD_ZERO( &rfds );
+      FD_SET( STDIN_FILENO, &rfds );
+      FD_SET( fd, &rfds );
+      int state = select( fdMax, &rfds, NULL, NULL, NULL );
+      if( state < 0 )
+         break;
+      if( state == 0 )
+         continue;
+      if( FD_ISSET( STDIN_FILENO, &rfds ) )
+      {
+         if( read( STDIN_FILENO, &inKey, sizeof( inKey ) ) > 0 )
+         {
+            inKey &= 0xFF;
+            if( inKey == '\e' )
+            {
+               printf( "End...\n" );
+            }
+         }
+      }
+      if( FD_ISSET( fd, &rfds ) )
+      {
+         int ready;
+         unsigned int readIndex;
+         if( ioctl( fd, DMAFLIP_IOCTL_GET_READY, &readIndex) < 0 )
+         {
             perror("ioctl");
             break;
-        }
+         }
+         printf( "User reads buffer[%d]: %s\n", readIndex, (char*)pMappedMems[readIndex] );
+      }
+   }
+   while( inKey != '\e' );
 
-        int read_idx = ready ^ 1;  // Lese aus dem nicht mehr aktiven Puffer
-        printf("User liest Buffer %d:\n%s", read_idx, mapped + read_idx * BUFFER_SIZE);
-        sleep(1);
-    }
-
-    munmap(mapped, BUFFER_SIZE * 2);
-    close(fd);
-    return 0;
+   munmap( pMappedMems[0], BUFFER_SIZE * NUM_BUFFERS );
+   close( fd );
+   resetTerminalInput();
+   return EXIT_SUCCESS;
 }
+
+/*================================== EOF ====================================*/
 
