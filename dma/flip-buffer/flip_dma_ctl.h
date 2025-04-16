@@ -23,7 +23,11 @@
 #define NUM_BUFFERS 2
 #define BUFFER_SIZE 4096
 
-#define DMAFLIP_IOCTL_GET_READY _IOR( 'D', 1, int )
+#define TOTAL_BUFFER_SIZE (BUFFER_SIZE * NUM_BUFFERS)
+
+#define SEQUENCE_TO_BUFFER_NO( s ) ((s) % NUM_BUFFERS)
+
+#define DMAFLIP_IOCTL_GET_SEQUENCE _IOR( 'S', 1, unsigned int )
 
 #endif /* ifndef _FLIP_DMA_CTL_H */
 /*================================== EOF ====================================*/

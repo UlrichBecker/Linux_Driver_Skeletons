@@ -24,15 +24,15 @@ int main( void )
    const int fd = open( DEV_FILE, O_RDONLY );
    if( fd < 0 )
    {
-      perror( "open" DEV_FILE );
+      perror( ESC_ERROR "open" DEV_FILE ESC_NORMAL );
       return EXIT_FAILURE;
    }
 
    void* pMappedMems[NUM_BUFFERS];
-   pMappedMems[0] = mmap( NULL, BUFFER_SIZE * NUM_BUFFERS, PROT_READ, MAP_SHARED, fd, 0 );
+   pMappedMems[0] = mmap( NULL, TOTAL_BUFFER_SIZE, PROT_READ, MAP_SHARED, fd, 0 );
    if( pMappedMems[0] == MAP_FAILED )
    {
-      perror("mmap");
+      perror( ESC_ERROR "mmap" ESC_NORMAL );
       return EXIT_FAILURE;
    }
    pMappedMems[1] = pMappedMems[0] + BUFFER_SIZE;
@@ -54,7 +54,10 @@ int main( void )
       FD_SET( fd, &rfds );
       int state = select( fdMax, &rfds, NULL, NULL, NULL );
       if( state < 0 )
+      {
+         perror( ESC_ERROR "select" ESC_NORMAL );
          break;
+      }
       if( state == 0 )
          continue;
       if( FD_ISSET( STDIN_FILENO, &rfds ) )
@@ -71,18 +74,20 @@ int main( void )
       if( FD_ISSET( fd, &rfds ) )
       {
          int ready;
-         unsigned int readIndex;
-         if( ioctl( fd, DMAFLIP_IOCTL_GET_READY, &readIndex) < 0 )
+         unsigned int sequence;
+         if( ioctl( fd, DMAFLIP_IOCTL_GET_SEQUENCE, &sequence) < 0 )
          {
-            perror("ioctl");
+            perror( ESC_ERROR "ioctl" ESC_NORMAL );
             break;
          }
-         printf( "User reads buffer[%d]: %s\n", readIndex, (char*)pMappedMems[readIndex] );
+         unsigned int bufferIndex = SEQUENCE_TO_BUFFER_NO( sequence );
+         printf( "User reads sequence: %d, buffer[%d]: " ESC_FG_MAGENTA "\"%s\"\n" ESC_NORMAL,
+                  sequence, bufferIndex, (char*)pMappedMems[bufferIndex] );
       }
    }
    while( inKey != '\e' );
 
-   munmap( pMappedMems[0], BUFFER_SIZE * NUM_BUFFERS );
+   munmap( pMappedMems[0], TOTAL_BUFFER_SIZE );
    close( fd );
    resetTerminalInput();
    return EXIT_SUCCESS;

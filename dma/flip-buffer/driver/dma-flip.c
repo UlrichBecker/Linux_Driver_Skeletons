@@ -12,20 +12,16 @@
 #include <linux/fs.h>
 #include <linux/mm.h>
 #include <linux/init.h>
-#include <linux/slab.h>
-#include <linux/uaccess.h>
-#include <linux/device.h>
-#include <linux/cdev.h>
+#include <linux/miscdevice.h>
 #include <linux/mutex.h>
 #include <linux/kthread.h>
 #include <linux/delay.h>
 #include <linux/poll.h>
 #include <linux/dma-mapping.h>
 
+#include <stdbool.h>
+
 #include <flip_dma_ctl.h>
-
-#define CLASS_NAME  DEVICE_NAME "class"
-
 
 MODULE_LICENSE("GPL");
 
@@ -55,21 +51,17 @@ MODULE_LICENSE("GPL");
    printk( KERN_INFO DEVICE_BASE_FILE_NAME ": " constStr, ## n )
 /* End of message helper macros for "dmesg" ++++++++***************************/
 
-
 struct DMA_FLIP_BUFFER_T
 {
-   unsigned int readyIndex;
-   unsigned int dataReady;
+   unsigned int sequence;
+   bool         dataReady;
    void*        pDmaBuffers[NUM_BUFFERS];
    dma_addr_t   dmaHandlers[NUM_BUFFERS];
 };
 
 struct GLOBAL_T
 {
-   struct device*           pDmaDevice;
-   struct class*            pDmaflipClass;
-   struct cdev              pdmaflipCdev;
-   int                      major;
+   struct miscdevice        miscdev;
    struct task_struct*      pThread;
    struct mutex             dmaFlipMutex;
    wait_queue_head_t        waitFlipQueue;
@@ -78,13 +70,13 @@ struct GLOBAL_T
 
 static struct GLOBAL_T global =
 {
-   .oDmaFlip.readyIndex = 0,
-   .oDmaFlip.dataReady = 0
+   .oDmaFlip.sequence = 0,
+   .oDmaFlip.dataReady = false
 };
 
 /*-----------------------------------------------------------------------------
  */
-static int onMmap( struct file* pFile, struct vm_area_struct* pVma)
+static int onMmap( struct file* pFile, struct vm_area_struct* pVma )
 {
    DEBUG_MESSAGE( "\n" );
    const unsigned long len = pVma->vm_end - pVma->vm_start;
@@ -94,7 +86,8 @@ static int onMmap( struct file* pFile, struct vm_area_struct* pVma)
       return -EINVAL;
    }
 
-   int ret = dma_mmap_coherent( global.pDmaDevice, pVma,
+   int ret = dma_mmap_coherent( global.miscdev.this_device,
+                                pVma,
                                 global.oDmaFlip.pDmaBuffers[0],
                                 global.oDmaFlip.dmaHandlers[0],
                                 BUFFER_SIZE * NUM_BUFFERS );
@@ -111,7 +104,10 @@ static unsigned int onPoll( struct file* pFile, poll_table* pPollTable )
 {
    DEBUG_MESSAGE( "\n" );
    poll_wait( pFile, &global.waitFlipQueue, pPollTable );
-   if( global.oDmaFlip.dataReady != 0 )
+   mutex_lock( &global.dmaFlipMutex );
+   bool dataReady = global.oDmaFlip.dataReady;
+   mutex_unlock( &global.dmaFlipMutex );
+   if( dataReady )
       return POLLIN | POLLRDNORM;
    return 0;
 }
@@ -121,22 +117,22 @@ static unsigned int onPoll( struct file* pFile, poll_table* pPollTable )
 static long onIoctl( struct file* pFile, unsigned int cmd, unsigned long arg )
 {
    DEBUG_MESSAGE( "\n" );
-   if( cmd == DMAFLIP_IOCTL_GET_READY )
+   if( cmd == DMAFLIP_IOCTL_GET_SEQUENCE )
    {
       mutex_lock( &global.dmaFlipMutex );
-      if( global.oDmaFlip.dataReady == 0 )
+      if( !global.oDmaFlip.dataReady )
       {
          mutex_unlock( &global.dmaFlipMutex );
          return -EAGAIN;
       }
-      unsigned int readIndex = (global.oDmaFlip.readyIndex + 1) % NUM_BUFFERS;
-      if( copy_to_user( (unsigned int __user *)arg, &readIndex, sizeof(readIndex)) != 0 )
+      typeof(global.oDmaFlip.sequence) sequence = global.oDmaFlip.sequence - 1;
+      if( copy_to_user( (typeof(sequence) __user *)arg, &sequence, sizeof(sequence)) != 0 )
       {
          mutex_unlock( &global.dmaFlipMutex );
          ERROR_MESSAGE( "copy_to_user\n" );
          return -EFAULT;
       }
-      global.oDmaFlip.dataReady = 0;
+      global.oDmaFlip.dataReady = false;
       mutex_unlock( &global.dmaFlipMutex );
       return 0;
    }
@@ -180,21 +176,22 @@ static int threadFunction( void* pData )
    {  /*
        * write into the inactive buffer.
        */
-      int readyIndex = global.oDmaFlip.readyIndex;
+      int sequence = global.oDmaFlip.sequence;
+      snprintf( global.oDmaFlip.pDmaBuffers[SEQUENCE_TO_BUFFER_NO(sequence)], BUFFER_SIZE,
+                "DMA-Buffer %d full, count = %d", SEQUENCE_TO_BUFFER_NO(sequence), count++ );
 
-      readyIndex = (readyIndex + 1) % NUM_BUFFERS;
-      snprintf( global.oDmaFlip.pDmaBuffers[readyIndex], BUFFER_SIZE,
-                "DMA-Buffer %d full, count = %d", readyIndex, count++ );
-
+      sequence++;
       mutex_lock( &global.dmaFlipMutex );
-      global.oDmaFlip.readyIndex = readyIndex;
+      global.oDmaFlip.sequence = sequence;
       mutex_unlock( &global.dmaFlipMutex );
 
       /*
        * Simulating execution-time.
        */
       ssleep( 1 );
-      global.oDmaFlip.dataReady = 1;
+      mutex_lock( &global.dmaFlipMutex );
+      global.oDmaFlip.dataReady = true;
+      mutex_unlock( &global.dmaFlipMutex );
       wake_up_interruptible( &global.waitFlipQueue );
    }
    DEBUG_MESSAGE( " Thread terminated!\n" );
@@ -205,35 +202,33 @@ static int threadFunction( void* pData )
  */
 static int __init onInit( void )
 {
-   dev_t dev;
-   int ret;
+   global.miscdev.minor = MISC_DYNAMIC_MINOR;
+   global.miscdev.name  = DEVICE_NAME;
+   global.miscdev.fops  = &dmaflip_fops;
+   if( misc_register( &global.miscdev ) != 0 )
+   {
+      ERROR_MESSAGE( "misc_register\n" );
+      return -ENODEV;
+   }
 
    mutex_init( &global.dmaFlipMutex );
    init_waitqueue_head( &global.waitFlipQueue );
 
-   ret = alloc_chrdev_region( &dev, 0, 1, DEVICE_NAME );
-   if( ret < 0 )
-      return ret;
-   global.major = MAJOR(dev);
+   struct device* pDev = global.miscdev.this_device;
+   if( pDev->dma_mask == NULL )
+      pDev->dma_mask = &pDev->coherent_dma_mask;
+   pDev->coherent_dma_mask = DMA_BIT_MASK(32);
 
-   cdev_init( &global.pdmaflipCdev, &dmaflip_fops );
-   cdev_add( &global.pdmaflipCdev, dev, 1 );
-
-   global.pDmaflipClass = class_create( THIS_MODULE, CLASS_NAME );
-   global.pDmaDevice = device_create( global.pDmaflipClass, NULL, dev, NULL, DEVICE_NAME );
-
-   if( global.pDmaDevice->dma_mask == NULL )
-      global.pDmaDevice->dma_mask = &global.pDmaDevice->coherent_dma_mask;
-   global.pDmaDevice->coherent_dma_mask = DMA_BIT_MASK(32);
-
-   global.oDmaFlip.pDmaBuffers[0] = dma_alloc_coherent( global.pDmaDevice,
-                                                        BUFFER_SIZE * NUM_BUFFERS,
+   global.oDmaFlip.pDmaBuffers[0] = dma_alloc_coherent( pDev,
+                                                        TOTAL_BUFFER_SIZE,
                                                         &global.oDmaFlip.dmaHandlers[0], GFP_KERNEL );
    if( global.oDmaFlip.pDmaBuffers[0] == NULL )
    {
       ERROR_MESSAGE( "dma_alloc_coherent" );
+      misc_deregister( &global.miscdev );
       return -ENOMEM;
    }
+
    global.oDmaFlip.pDmaBuffers[1] = global.oDmaFlip.pDmaBuffers[0] + BUFFER_SIZE;
    global.oDmaFlip.dmaHandlers[1] = global.oDmaFlip.dmaHandlers[0] + BUFFER_SIZE;
 
@@ -241,9 +236,14 @@ static int __init onInit( void )
    if( IS_ERR( global.pThread ) )
    {
       ERROR_MESSAGE( "kthread_run\n" );
+      dma_free_coherent( pDev, TOTAL_BUFFER_SIZE,
+                         global.oDmaFlip.pDmaBuffers[0], global.oDmaFlip.dmaHandlers[0]);
+      misc_deregister( &global.miscdev );
       return PTR_ERR( global.pThread );
    }
+
    INFO_MESSAGE( "Module successful loaded\n" );
+
    return 0;
 }
 
@@ -252,15 +252,9 @@ static int __init onInit( void )
 static void __exit onExit(void)
 {
    kthread_stop( global.pThread );
-
-   dma_free_coherent( global.pDmaDevice, BUFFER_SIZE * NUM_BUFFERS,
+   dma_free_coherent( global.miscdev.this_device, TOTAL_BUFFER_SIZE,
                       global.oDmaFlip.pDmaBuffers[0], global.oDmaFlip.dmaHandlers[0]);
-
-   device_destroy( global.pDmaflipClass, MKDEV(global.major, 0) );
-   class_destroy( global.pDmaflipClass );
-   cdev_del( &global.pdmaflipCdev );
-   unregister_chrdev_region( MKDEV(global.major, 0), 1 );
-
+   misc_deregister( &global.miscdev );
    INFO_MESSAGE( "Module successful removed.\n" );
 }
 
