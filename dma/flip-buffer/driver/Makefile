@@ -11,7 +11,7 @@
 TARGET_NAME := dmaflip
 SOURCES := dma-flip.c
 
-INCLUDE_DIR := ..
+INCLUDE_DIRS := ..
 
 CONFIG_SKELETON ?= m
 CONFIG_FEATURE_X := y
@@ -23,7 +23,7 @@ ifdef KERNELRELEASE
    ifdef DEFINES
       EXTRA_CFLAGS += $(addprefix -D, $(DEFINES))
    endif
-   EXTRA_CFLAGS += $(addprefix -I, $(M)/$(INCLUDE_DIR))
+   EXTRA_CFLAGS += $(addprefix -I$(M)/, $(INCLUDE_DIRS))
    obj-$(CONFIG_SKELETON) += $(TARGET_NAME).o
    ifdef SOURCES
       $(TARGET_NAME)-objs := $(patsubst %.c, %.o, $(SOURCES))
@@ -64,7 +64,6 @@ checkKernelDir:
 
 clean:
 	rm -f *.mod.c *.o *.rc .*.d *.ko modules.order Module.symvers .*.cmd .tmp_versions/* *.livepatch $(TARGET_NAME).mod
-#	rmdir .tmp_versions
 
 status:
 	@printf "Target:   "

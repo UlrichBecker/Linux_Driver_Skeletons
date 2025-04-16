@@ -1,1 +1,0 @@
-savedcmd_/home/ubecker/src/extern/Linux_Driver_Skeletons/platform_driver/single/platform.mod := printf '%s\n'   platform-example.o | awk '!x[$$0]++ { print("/home/ubecker/src/extern/Linux_Driver_Skeletons/platform_driver/single/"$$0) }' > /home/ubecker/src/extern/Linux_Driver_Skeletons/platform_driver/single/platform.mod

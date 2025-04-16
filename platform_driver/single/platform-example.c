@@ -174,7 +174,7 @@ static const struct of_device_id g_ofMatchList[] =
 
 MODULE_DEVICE_TABLE( of, g_ofMatchList );
 
-static struct platform_driver myPlatformDriver=
+static struct platform_driver myPlatformDriver =
 {
     .probe        = onProbe,
     .remove       = onRemove,
