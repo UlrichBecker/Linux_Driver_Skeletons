@@ -11,9 +11,12 @@
 TARGET_NAME := poll
 SOURCES := poll-drv.c
 
-DEFINES += CONFIG_DEBUG_POLL_DRV
+DEFINES += CONFIG_DEBUG_POLL_DRV DEBUG
 
 CONFIG_POLL_DRV ?= m
+
+CONFIG_FEATURE_X := y
+ccflags-$(CONFIG_FEATURE_X) := -Wno-declaration-after-statement -std=gnu99
 
 ifdef KERNELRELEASE
    # This code-segment becomes invoked from the kernels master-makefile.

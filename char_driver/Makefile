@@ -10,9 +10,12 @@
 TARGET_NAME := skeleton
 SOURCES := skeleton_char_drv.c
 
-DEFINES += CONFIG_DEBUG_SKELETON
+DEFINES += CONFIG_DEBUG_SKELETON DEBUG
 
 CONFIG_SKELETON ?= m
+
+CONFIG_FEATURE_X := y
+ccflags-$(CONFIG_FEATURE_X) := -Wno-declaration-after-statement -std=gnu99
 
 ifdef KERNELRELEASE
    # This code-segment becomes invoked from the kernels master-makefile.
@@ -36,7 +39,7 @@ else
 
    PWD  := $(shell pwd)
 
-.PHONY: all checkKernelDir clean status
+.PHONY: all checkKernelDir clean status rebuild
 
 # Invoke of the kernels master-makefile.
 all: checkKernelDir status
@@ -59,7 +62,9 @@ checkKernelDir:
 
 clean:
 	rm -f *.mod.c *.o *.rc .*.d *.ko modules.order Module.symvers .*.cmd .tmp_versions/* *.livepatch $(TARGET_NAME).mod
-	rmdir .tmp_versions
+#	rmdir .tmp_versions
+
+rebuild: clean all
 
 status:
 	@printf "Target:   "

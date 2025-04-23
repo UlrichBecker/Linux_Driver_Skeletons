@@ -45,7 +45,6 @@ MODULE_LICENSE( "GPL" );
  */
 #define MAX_INSTANCES 10
 
-
 #ifndef MAX_INSTANCES
   #error Macro MAX_INSTANCES is not defined!
 #endif
@@ -63,22 +62,21 @@ MODULE_LICENSE( "GPL" );
  * "dmesg -w" corresponds the old “tail -f /var/log/messages”
  */
 #define ERROR_MESSAGE( constStr, n... ) \
-   printk( KERN_ERR DEVICE_BASE_FILE_NAME "-systemerror %d: %s" constStr, __LINE__, __func__, ## n )
+   pr_err( DEVICE_BASE_FILE_NAME "-error %d: %s" constStr, __LINE__, __func__, ## n )
+
+#define DEBUG_MESSAGE( constStr, n... ) \
+   pr_debug( DEVICE_BASE_FILE_NAME "-dbg %d: %s" constStr, __LINE__, __func__, ## n )
 
 #if defined( CONFIG_DEBUG_SKELETON ) || defined(__DOXYGEN__)
-   #define DEBUG_MESSAGE( constStr, n... ) \
-      printk( KERN_DEBUG DEVICE_BASE_FILE_NAME "-dbg %d: %s" constStr, __LINE__, __func__, ## n )
-
    #define DEBUG_ACCESSMODE( pFile ) \
       DEBUG_MESSAGE( ": access: %s\n", \
                      (pFile->f_flags & O_NONBLOCK)? "non blocking":"blocking" )
 #else
-   #define DEBUG_MESSAGE( constStr, n... )
    #define DEBUG_ACCESSMODE( pFile )
 #endif
 
 #define INFO_MESSAGE( constStr, n... ) \
-   printk( KERN_INFO DEVICE_BASE_FILE_NAME ": " constStr, ## n )
+   pr_info( DEVICE_BASE_FILE_NAME ": " constStr, ## n )
 
 /* End of message helper macros for "dmesg" ++++++++***************************/
 
@@ -89,6 +87,7 @@ typedef struct
 {
    int      minor;
    atomic_t openCount;
+   struct device* pDev;
    /*
     * Further attributes for your application ...
     */
@@ -215,19 +214,19 @@ static ssize_t onRead( struct file* pInstance,   /*!< @see include/linux/fs.h   
  * @brief Callback function becomes invoked by the function write() from the
  *        user-space.
  */
-static ssize_t onWrite( struct file *pInstance,
+static ssize_t onWrite( struct file *pFile,
                         const char __user* pBuffer,
                         size_t len,
                         loff_t* pOffset )
 {
    DEBUG_MESSAGE( ": len = %ld, offset = %lld\n", (long int)len, *pOffset );
-   DEBUG_ACCESSMODE( pInstance );
+   DEBUG_ACCESSMODE( pFile );
 
 #if MAX_INSTANCES > 1
-   BUG_ON( pInstance->private_data == NULL );
-   DEBUG_MESSAGE( "   Minor: %d\n", ((INSTANCE_T*)pInstance->private_data)->minor );
+   BUG_ON( pFile->private_data == NULL );
+   DEBUG_MESSAGE( "   Minor: %d\n", ((INSTANCE_T*)pFile->private_data)->minor );
    DEBUG_MESSAGE( "   Open-counter: %d\n",
-                   atomic_read( &((INSTANCE_T*)pInstance->private_data)->openCount ));
+                   atomic_read( &((INSTANCE_T*)pFile->private_data)->openCount ));
 #else
    DEBUG_MESSAGE( "   Open-counter: %d\n", 
                   atomic_read( &mg_module.instance.openCount ));
@@ -250,17 +249,17 @@ static ssize_t onWrite( struct file *pInstance,
  * @brief Callback function becomes invoked by the function ioctrl() from the
  *        user-space.
  */
-static long onIoctrl( struct file* pInstance,
+static long onIoctrl( struct file* pFile,
                       unsigned int cmd,
                       unsigned long arg )
 {
    DEBUG_MESSAGE( ": cmd = %d arg = %08lX\n", cmd, arg );
-   DEBUG_ACCESSMODE( pInstance );
+   DEBUG_ACCESSMODE( pFile );
 #if MAX_INSTANCES > 1
-   BUG_ON( pInstance->private_data == NULL );
-   DEBUG_MESSAGE( "   Minor: %d\n", ((INSTANCE_T*)pInstance->private_data)->minor );
+   BUG_ON( pFile->private_data == NULL );
+   DEBUG_MESSAGE( "   Minor: %d\n", ((INSTANCE_T*)pFile->private_data)->minor );
    DEBUG_MESSAGE( "   Open-counter: %d\n",
-                   atomic_read( &((INSTANCE_T*)pInstance->private_data)->openCount ));
+                   atomic_read( &((INSTANCE_T*)pFile->private_data)->openCount ));
 #else
    DEBUG_MESSAGE( "   Open-counter: %d\n",
                    atomic_read( &mg_module.instance.openCount ));
@@ -305,7 +304,7 @@ static int _procOnOpen( struct inode* pInode, struct file *pFile )
 
 /*-----------------------------------------------------------------------------
  */
-static ssize_t procOnWrite( struct file* seq, const char* pData,
+static int procOnWrite( struct file* seq, const char __user* pData,
                             size_t len, loff_t* pPos )
 {
    DEBUG_MESSAGE( "\n" );
@@ -374,6 +373,45 @@ static int onPmResume( struct device* pDev )
 #endif /* ifdef CONFIG_PM */
 /* Power management functions end ********************************************/
 
+/****************** Device attribut functions ********************************/
+
+#define ATTR_FILE_NAME my_attr_file
+
+#define DEVICE_ATTR_PTR( _name )  &dev_attr_ ## _name
+#define DEVICE_ATTR_R_FUNCTION( _name ) _name ## _show
+#define DEVICE_ATTR_W_FUNCTION( _name ) _name ## _store
+
+/*-----------------------------------------------------------------------------
+ * cat /sys/class/skeleton/skeleton[n]/my_attr_file
+ */
+static ssize_t DEVICE_ATTR_R_FUNCTION(ATTR_FILE_NAME)(struct device* pDev,
+                             struct device_attribute* pAttr, char* pBuf )
+{
+
+    INSTANCE_T* pInstance = (INSTANCE_T*)pDev->driver_data;
+
+    return sprintf( pBuf, "Instance: %d open-count: %d\n",
+                    pInstance->minor, atomic_read( &pInstance->openCount ) );
+}
+
+/*-----------------------------------------------------------------------------
+ * echo "Bla bla" > /sys/class/skeleton/skeleton[n]/"my_attr_file
+ */
+static ssize_t DEVICE_ATTR_W_FUNCTION(ATTR_FILE_NAME)(struct device* pDev,
+                              struct device_attribute* pAttr,
+                              const char *buf, size_t count )
+{
+    INSTANCE_T* pInstance = (INSTANCE_T*)pDev->driver_data;
+    INFO_MESSAGE("Value: %s written in instance %d\n", buf, pInstance->minor );
+    return count;
+}
+
+static DEVICE_ATTR( ATTR_FILE_NAME, 0644,
+                    DEVICE_ATTR_R_FUNCTION(ATTR_FILE_NAME),
+                    DEVICE_ATTR_W_FUNCTION(ATTR_FILE_NAME) );
+
+/****************** End device attribut functions ****************************/
+
 /*!----------------------------------------------------------------------------
  * @brief Driver constructor
  */
@@ -423,33 +461,46 @@ static int __init driverInit( void )
    for( minor = 0; minor < MAX_INSTANCES; minor++ )
    {
       currentMinor = minor;
-      if( device_create( mg_module.pClass,
+      if( (mg_module.instance[minor].pDev = device_create( mg_module.pClass,
                          NULL,
                          mg_module.deviceNumber | minor,
                          NULL,
                          DEVICE_BASE_FILE_NAME "%d",
-                         minor )
+                         minor ))
           == NULL )
       {
          ERROR_MESSAGE( "device_create: " DEVICE_BASE_FILE_NAME "%d\n", minor );
          goto L_INSTANCE_REMOVE;
       }
+      mg_module.instance[minor].pDev->driver_data = &mg_module.instance[minor];
       mg_module.instance[minor].minor = minor;
       atomic_set( &mg_module.instance[minor].openCount, 0 );
+
+      if( device_create_file( mg_module.instance[minor].pDev, DEVICE_ATTR_PTR( ATTR_FILE_NAME ) ) != 0 )
+      {
+         ERROR_MESSAGE( "device_create_file: " DEVICE_BASE_FILE_NAME "%d\n", minor );
+         goto L_INSTANCE_REMOVE;
+      }
       DEBUG_MESSAGE( ": Instance " DEVICE_BASE_FILE_NAME "%d created\n", minor );
    }
    currentMinor = MAX_INSTANCES;
 #else
-   if( device_create( mg_module.pClass,
-                      NULL,
-                      mg_module.deviceNumber,
-                      NULL,
-                      DEVICE_BASE_FILE_NAME )
+   if( (mg_module.instance.pDev = device_create( mg_module.pClass,
+                                                 NULL,
+                                                 mg_module.deviceNumber,
+                                                 NULL,
+                                                 DEVICE_BASE_FILE_NAME ))
       == NULL )
    {
       ERROR_MESSAGE( "device_create: " DEVICE_BASE_FILE_NAME "\n" );
       goto L_INSTANCE_REMOVE;
    }
+   if( device_create_file( mg_module.instance.pDev, DEVICE_ATTR_PTR( ATTR_FILE_NAME ) ) != 0 )
+   {
+      ERROR_MESSAGE( "device_create_file: " DEVICE_BASE_FILE_NAME "\n" );
+      goto L_INSTANCE_REMOVE;
+   }
+   mg_module.instance.pDev->driver_data = &mg_module.instance;
    mg_module.instance.minor = 0;
    atomic_set( &mg_module.instance.openCount, 0 );
    DEBUG_MESSAGE( ": Instance " DEVICE_BASE_FILE_NAME " created\n" );
@@ -485,9 +536,15 @@ static int __init driverInit( void )
 L_INSTANCE_REMOVE:
 #if MAX_INSTANCES > 1
    for( minor = 0; minor < currentMinor; minor++ )
+   {
+      device_remove_file( mg_module.instance[minor].pDev, DEVICE_ATTR_PTR( ATTR_FILE_NAME ) );
       device_destroy( mg_module.pClass, mg_module.deviceNumber | minor );
+      DEBUG_MESSAGE( ": Instance " DEVICE_BASE_FILE_NAME "%d destroyed\n", minor );
+   }
 #else
+   device_remove_file( mg_module.instance.pDev, DEVICE_ATTR_PTR( ATTR_FILE_NAME ) );
    device_destroy( mg_module.pClass, mg_module.deviceNumber );
+   DEBUG_MESSAGE( ": Instance " DEVICE_BASE_FILE_NAME " destroyed\n" );
 #endif
 
 L_CLASS_REMOVE:
@@ -517,9 +574,15 @@ static void __exit driverExit( void )
 
 #if MAX_INSTANCES > 1
   for( minor = 0; minor < MAX_INSTANCES; minor++ )
+  {
+     device_remove_file( mg_module.instance[minor].pDev, DEVICE_ATTR_PTR( ATTR_FILE_NAME ) );
      device_destroy( mg_module.pClass, mg_module.deviceNumber | minor );
+     DEBUG_MESSAGE( ": Instance " DEVICE_BASE_FILE_NAME "%d destroyed\n", minor );
+  }
 #else
+  device_remove_file( mg_module.instance.pDev, DEVICE_ATTR_PTR( ATTR_FILE_NAME ) );
   device_destroy( mg_module.pClass, mg_module.deviceNumber );
+  DEBUG_MESSAGE( ": Instance " DEVICE_BASE_FILE_NAME " destroyed\n" );
 #endif
   class_destroy( mg_module.pClass );
   cdev_del( mg_module.pObject );

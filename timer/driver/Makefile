@@ -14,6 +14,8 @@ SOURCES := timer-drv.c
 CONFIG_TIMER_DRV ?= m
 CONFIG_FEATURE_X := y
 
+DEFINES += DEBUG
+
 ccflags-$(CONFIG_FEATURE_X) := -Wno-declaration-after-statement -std=gnu99
 
 ifdef KERNELRELEASE
@@ -39,7 +41,7 @@ else
 
    PWD  := $(shell pwd)
 
-.PHONY: all checkKernelDir clean status
+.PHONY: all checkKernelDir clean status rebuild
 
 # Invoke of the kernels master-makefile.
 all: checkKernelDir status
@@ -63,6 +65,8 @@ checkKernelDir:
 clean:
 	rm -f *.mod.c *.o *.ko modules.order Module.symvers .*.cmd .tmp_versions/* *.livepatch $(TARGET_NAME).mod
 	rmdir .tmp_versions
+
+rebuild: clean all
 
 status:
 	@printf "Target:   "
