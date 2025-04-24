@@ -295,7 +295,7 @@ static int procOnOpen( struct seq_file* pSeqFile, void* pValue )
  */
 static int _procOnOpen( struct inode* pInode, struct file *pFile )
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
    return single_open( pFile, procOnOpen, NULL );
 #else
    return single_open( pFile, procOnOpen, PDE_DATA( pInode ) );
@@ -313,7 +313,7 @@ static int procOnWrite( struct file* seq, const char __user* pData,
 
 /*-----------------------------------------------------------------------------
  */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
 static const struct proc_ops mg_procFileOps =
 {
   .proc_open    = _procOnOpen,
@@ -375,11 +375,14 @@ static int onPmResume( struct device* pDev )
 
 /****************** Device attribut functions ********************************/
 
+
+
+#define DEVICE_ATTR_PTR( _name )  &dev_attr_##_name
+#define DEVICE_ATTR_R_FUNCTION( _name ) _name##_show
+#define DEVICE_ATTR_W_FUNCTION( _name ) _name##_store
+
 #define ATTR_FILE_NAME my_attr_file
 
-#define DEVICE_ATTR_PTR( _name )  &dev_attr_ ## _name
-#define DEVICE_ATTR_R_FUNCTION( _name ) _name ## _show
-#define DEVICE_ATTR_W_FUNCTION( _name ) _name ## _store
 
 /*-----------------------------------------------------------------------------
  * cat /sys/class/skeleton/skeleton[n]/my_attr_file
@@ -388,7 +391,7 @@ static ssize_t DEVICE_ATTR_R_FUNCTION(ATTR_FILE_NAME)(struct device* pDev,
                              struct device_attribute* pAttr, char* pBuf )
 {
 
-    INSTANCE_T* pInstance = (INSTANCE_T*)pDev->driver_data;
+    INSTANCE_T* pInstance = dev_get_drvdata( pDev );
 
     return sprintf( pBuf, "Instance: %d open-count: %d\n",
                     pInstance->minor, atomic_read( &pInstance->openCount ) );
@@ -401,14 +404,18 @@ static ssize_t DEVICE_ATTR_W_FUNCTION(ATTR_FILE_NAME)(struct device* pDev,
                               struct device_attribute* pAttr,
                               const char *buf, size_t count )
 {
-    INSTANCE_T* pInstance = (INSTANCE_T*)pDev->driver_data;
+    INSTANCE_T* pInstance = dev_get_drvdata( pDev );
     INFO_MESSAGE("Value: %s written in instance %d\n", buf, pInstance->minor );
     return count;
 }
 
+#if 1
 static DEVICE_ATTR( ATTR_FILE_NAME, 0644,
                     DEVICE_ATTR_R_FUNCTION(ATTR_FILE_NAME),
                     DEVICE_ATTR_W_FUNCTION(ATTR_FILE_NAME) );
+#else
+static DEVICE_ATTR_DECLARE( my_attr_file, 0664 );
+#endif
 
 /****************** End device attribut functions ****************************/
 
@@ -472,7 +479,7 @@ static int __init driverInit( void )
          ERROR_MESSAGE( "device_create: " DEVICE_BASE_FILE_NAME "%d\n", minor );
          goto L_INSTANCE_REMOVE;
       }
-      mg_module.instance[minor].pDev->driver_data = &mg_module.instance[minor];
+      dev_set_drvdata( mg_module.instance[minor].pDev, &mg_module.instance[minor] );
       mg_module.instance[minor].minor = minor;
       atomic_set( &mg_module.instance[minor].openCount, 0 );
 
@@ -500,7 +507,7 @@ static int __init driverInit( void )
       ERROR_MESSAGE( "device_create_file: " DEVICE_BASE_FILE_NAME "\n" );
       goto L_INSTANCE_REMOVE;
    }
-   mg_module.instance.pDev->driver_data = &mg_module.instance;
+   dev_set_drvdata( mg_module.instance.pDev, &mg_module.instance );
    mg_module.instance.minor = 0;
    atomic_set( &mg_module.instance.openCount, 0 );
    DEBUG_MESSAGE( ": Instance " DEVICE_BASE_FILE_NAME " created\n" );
